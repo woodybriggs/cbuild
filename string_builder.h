@@ -1,8 +1,66 @@
+/**
+    @file string_builder.h
+    @brief 
+
+    Dependencies:
+    - (Optional & Default) LIBC: realloc, free, memcpy, fprintf
+
+    Features:
+    - 0 initialized String_Builder works out of the box
+
+
+    Documentation:
+    Do this
+        #define STRING_BUILDER_IMPL
+    before you include this file in *one* C or C++ file to create the implementation.
+
+    1. it should look like this:
+    ```c
+    #define STRING_BUILDER_IMPL
+    #include "string_builder.h"
+    ```
+
+    2. string builder depends on two procs from stdlib (realloc and free).
+       this can be overriden by two defines. 
+    ```c
+    #define STRING_BUILDER_realloc myrealloc
+    #define STRING_BUILDER_free myfree
+    ```
+
+    @nickname Woody
+    @author Edward Briggs (woody@ebrb.ltd)
+    @date 2025-02-23 T 16:43:00+08:00
+
+    @copyright Copyright (c) 2025 Edward Briggs
+
+    @license
+    This header file is distributed under the MIT License.
+
+    Copyright (c) 2025 Edward Briggs
+
+    Permission is hereby granted, free of charge, to any person obtaining a copy
+    of this software and associated documentation files (the "Software"), to deal
+    in the Software without restriction, including without limitation the rights
+    to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+    copies of the Software, and to permit persons to whom the Software is
+    furnished to do so, subject to the following conditions:
+
+    The above copyright notice and this permission notice shall be included in all
+    copies or substantial portions of the Software.
+
+    THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+    IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+    FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+    AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+    LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+    OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+    SOFTWARE.
+*/
+
+
 #ifndef STRING_BUILDER_H
 #define STRING_BUILDER_H
 
-#include <string.h>
-#include <stdarg.h>
 #include <stdio.h>
 #include <stddef.h>
 
@@ -23,13 +81,6 @@ typedef int boolx;
 #define STRING_BUILDER_INITAL_CAP 1024
 #endif // STRING_BUILDER_INITAL_CAP
 
-#if defined(CBUILD_alloc)
-#define STRING_BUILDER_alloc CBUILD_alloc
-#elif !defined(STRING_BUILDER_alloc)
-#include <stdlib.h>
-#define STRING_BUILDER_alloc malloc
-#endif
-
 #if defined(CBUILD_realloc)
 #define STRING_BUILDER_realloc CBUILD_realloc
 #elif !defined(STRING_BUILDER_realloc)
@@ -43,6 +94,21 @@ typedef int boolx;
 #include <stdlib.h>
 #define STRING_BUILDER_free free
 #endif
+
+#if defined(CBUILD_memcpy)
+#define STRING_BUILDER_memcpy CBUILD_memcpy
+#elif !defined(STRING_BUILDER_memcpy)
+#include <string.h>
+#define STRING_BUILDER_memcpy memcpy
+#endif
+
+#if defined(CBUILD_fprintf)
+#define STRING_BUILDER_fprintf CBUILD_fprintf
+#elif !defined(STRING_BUILDER_fprintf)
+#include <stdio.h>
+#define STRING_BUILDER_fprintf fprintf
+#endif
+
 
 
 typedef struct String_Builder_S {
@@ -58,14 +124,10 @@ void  string_builder_append_strn(String_Builder *sb, const char * str, int n);
 void  string_builder_clear(String_Builder *sb);
 void  string_builder_free(String_Builder *sb);
 void  string_builder_to_cstr(String_Builder *sb, char *cstr, size_t len);
-#define fmt_string(fmtstr, ...) fmt_string_impl(fmtstr, __VA_ARGS__, NULL);
-void  fmt_string_impl(char *fmtstr, ...);
 
 void  shell_escape(const char * str, String_Builder *out);
 
-#if defined(CBUILD) || defined(STRING_BUILDER_IMPL) || 1
-
-
+#if defined(CBUILD) || defined(STRING_BUILDER_IMPL)
 
 boolx string_builder_append_char(String_Builder* sb, const char c) {
     if (sb->len >= sb->cap) {
@@ -120,7 +182,7 @@ void string_builder_to_cstr(String_Builder *sb, char *cstr, size_t len) {
     if (cstr == NULL) return;
     if (sb->len > len) return;
 
-    memcpy(cstr, sb->ptr, sb->len); 
+    STRING_BUILDER_memcpy(cstr, sb->ptr, sb->len); 
     return;
 }
 

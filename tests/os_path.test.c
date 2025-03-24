@@ -1,19 +1,19 @@
+#define TEST_IMPL
+#include "../test.h"
 #define OS_PATH_IMPL
 #include "../os_path.h"
 
-#include <string.h>
+
+void test__os_path__convert_unix_to_windows(test_result_t *test_result) {
+   assert_true(test_result, true == false);
+}
+
 
 int main(void) {
 
-    Os_Path unix_path = os_path_create_styled("c:\\home\\user\\directory\\file", OS_PATH_STYLE_UNIX);
-    if (strncmp(unix_path.path, "c:/home/user/directory/file", 27) != 0) {
-        return 1;
-    } 
+    register_test("os_path converts unix to windows", test__os_path__convert_unix_to_windows);
 
-    Os_Path windows_path = os_path_create_styled("c:/home/user/directory/file", OS_PATH_STYLE_WINDOWS);
-    if (strncmp(windows_path.path, "c:\\home\\user\\directory\\file", 27) != 0) {
-        return 1;
-    }
+    run_tests(__FILE__);
 
     return 0;
 }

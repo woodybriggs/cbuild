@@ -1,10 +1,12 @@
 #ifndef RUN_H
 #define RUN_H
 
+#include "os_path.h"
 #include "string_builder.h"
 #include "arg_builder.h"
 #include "os_helpers.h"
 #include "c_compiler.h"
+#include "fmt_string.h"
 
 #if defined(CBUILD_alloc)
 #define RUN_alloc CBUILD_alloc
@@ -30,7 +32,22 @@
 AsyncProcessInfo run_async (Arg_Builder *arg_builder, String_Builder *sb);
 int              run_sync  (Arg_Builder *arg_builder, String_Builder *sb);
 int              run_wait_for_process(AsyncProcessInfo async_info);
-void rebuild_builder_if_needed(Arg_Builder *arg_builder, String_Builder *sb, int argc, char *const *argv, const char *filename, const char *const *dependency_filenames, size_t num_dependency_filenames);
+
+boolx should_rebuild(
+    const char *exe_name, 
+    const char *filename, 
+    const char *const *dependency_filenames, 
+    size_t num_dependency_filenames
+);
+
+void rebuild_and_rerun(
+    Arg_Builder *arg_builder, 
+    String_Builder *sb, 
+    C_Compiler_Options compile_options, 
+    int argc, 
+    char *const *argv, 
+    const char *filename
+);
 
 #if defined(CBUILD) || defined(RUN_IMPL)
 
@@ -139,7 +156,7 @@ AsyncProcessInfo run_async(Arg_Builder *arg_builder, String_Builder *sb) {
 }
 
 int run_wait_for_process(AsyncProcessInfo async_info) {
-    int status;
+    int status = 0;
     pid_t result = waitpid(async_info.pid, &status, 0);
 
     if (result == -1) {
@@ -167,7 +184,7 @@ int run_sync(Arg_Builder *arg_builder, String_Builder *sb) {
 }
 #endif // _WIN32
 
-boolx check_needs_rebuild(const char *exe_name, const char *filename, const char *const *dependency_filenames, size_t num_dependency_filenames) {
+boolx should_rebuild(const char *exe_name, const char *filename, const char *const *dependency_filenames, size_t num_dependency_filenames) {
     boolx needs_rebuild = false;
     
     long long int exe_modified_time  = os_get_last_modified_time(exe_name);
@@ -203,93 +220,60 @@ boolx check_needs_rebuild(const char *exe_name, const char *filename, const char
     return needs_rebuild;
 }
 
-void rebuild_builder_if_needed(
-    Arg_Builder *arg_builder, 
-    String_Builder *sb, 
+/**
+ * @brief 
+ * 
+ * @param compile_options output_type will be set to Executable and output_filename will be set to passed filename
+ */
+void rebuild_and_rerun(
+    Arg_Builder *arg_builder,
+    String_Builder *sb,
+    C_Compiler_Options compile_options,
     int argc, 
     char *const *argv, 
-    const char *filename, 
-    const char *const *dependency_filenames, 
-    size_t num_dependency_filenames
+    const char *filename
 ) {
-
     if (argc == 0 || argv == NULL) {
         fprintf(stderr, "error: argc argv is empty\n");
         return;
     }
-    const char * exe_name = argv[0];
-    boolx needs_rebuild = check_needs_rebuild(exe_name, filename, dependency_filenames, num_dependency_filenames);
-    #define MSCV_OBJ_DIR "tmp"
-    // if we are compiling with cl from msvc we need a place to dump 
-    // the obj files spat out from the compiler.
-    if (C_COMPILER_ENUM == C_Compiler_Msvc) {
-        if(!os_make_directory(MSCV_OBJ_DIR)) {
-        #ifdef _WIN32
-            if (GetLastError() != ERROR_ALREADY_EXISTS) {
-                fprintf(stderr, "error: create directory tmp for obj files\n");
-                return;
-            }
-        #else 
-            if (errno != EEXIST) {
-                fprintf(stderr, "error: create directory tmp\n");
-                return;
-            }
-        #endif
-        }
+
+    char *exe_name = argv[0];
+    const char *new_filename = 0;
+    (void)fmt_string(&new_filename, "%s.bak", exe_name);
+
+    fprintf(stderr, "[MOVE FILE] %s -> %s\n", exe_name, new_filename);
+    if (!os_move_file(exe_name, new_filename)) {
+        char *os_err_msg = os_get_last_error_string();
+        fprintf(stderr, "[MOVE FILE] unable to move file: %s\n", os_err_msg);
+        fmt_string_free(new_filename);
+        exit(1);
     }
 
-    if (needs_rebuild) {
-        string_builder_clear(sb);
-        string_builder_append_cstr(sb, exe_name);
-        string_builder_append_cstr(sb, ".bak");
-        string_builder_append_null(sb);
-
-        char *new_filename = (char *) RUN_alloc(sb->len);
-        string_builder_to_cstr(sb, new_filename, sb->len);
-
-        if (!os_move_file(exe_name, new_filename)) {
-            RUN_free(new_filename);
-            return;
-        }
-
-        arg_builder_append(arg_builder, C_COMPILER_EXE);
-
-        if (C_COMPILER_ENUM == C_Compiler_Msvc) {
-            String_Builder output_flag = {0};
-            string_builder_append_cstr(&output_flag, "/Fe:");
-            string_builder_append_char(&output_flag, '\"');
-            string_builder_append_cstr(&output_flag, exe_name);
-            string_builder_append_char(&output_flag, '\"');
-            arg_builder_append(arg_builder, output_flag.ptr);
-            string_builder_free(&output_flag);
-
-            arg_builder_append(arg_builder, "/Fo:\"" MSCV_OBJ_DIR "/\"");
-            arg_builder_append(arg_builder, "/Zi");
-        }
-        else {
-            arg_builder_append(arg_builder, "-Wall", "-Wextra", "-std=c99", "-pedantic", "-g");
-            arg_builder_append(arg_builder, "-o", exe_name);
-        }
-
-        string_builder_clear(sb);
-        arg_builder_append(arg_builder, filename);
-        int compile_code = run_sync(arg_builder, sb);
-        if (compile_code != 0) {
-            os_move_file(new_filename, exe_name);
-            RUN_free(new_filename);
-            return;
-        }
-        arg_builder_reset(arg_builder);
-        // TODO(woody): windows support
-        int ret_val = execvp(argv[0], argv);
-        if (ret_val == -1) {
-            fprintf(stderr, "error: reruning build system failed %s\n", os_get_last_error_string());
-            exit(1);
-            return;
-        }
+    compile_options.output_type = C_Compiler_Output_Type_Executable;
+    compile_options.output_filename = exe_name;
+    if (!c_compiler_compile_translation_unit(arg_builder, C_COMPILER_ENUM, compile_options, filename)) {
+        fmt_string_free(new_filename);
+        exit(1);
     }
-    string_builder_clear(sb);
-    arg_builder_reset(arg_builder); 
+
+    int compile_code = run_sync(arg_builder, sb);
+    if (compile_code != 0) {
+        fprintf(stderr, "[MOVE FILE] %s -> %s\n", new_filename, exe_name);
+        os_move_file(new_filename, exe_name);
+        fmt_string_free(new_filename);
+        exit(1);
+    }
+    arg_builder_clear(arg_builder);
+    // TODO(woody): windows support
+    fprintf(stderr, "[RERUN] %s\n", exe_name);
+    int ret_val = execvp(argv[0], argv);
+    if (ret_val == -1) {
+        fprintf(stderr, "error: reruning build system failed %s\n", os_get_last_error_string());
+        fmt_string_free(new_filename);
+        exit(1);
+        return;
+    }
     
     return;
 }

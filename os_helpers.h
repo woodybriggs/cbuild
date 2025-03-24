@@ -1,6 +1,7 @@
 #ifndef OS_HELPERS_H
 #define OS_HELPERS_H
 
+#include <_stdio.h>
 #include <stdio.h>
 #include <string.h>
 
@@ -54,6 +55,7 @@ typedef struct File_Handle_S {
     #endif
 } File_Handle;
 
+boolx         os_file_handle_is_valid   (File_Handle file_handle);
 File_Handle   os_open_file_for_read     (const char *filename);
 File_Handle   os_open_file_for_write    (const char *filename);
 boolx         os_close_file             (File_Handle file_handle);
@@ -126,6 +128,14 @@ boolx os_move_file(const char *old_filename, const char *new_filename) {
     return MoveFileExA(old_filename, new_filename, MOVEFILE_REPLACE_EXISTING);
 #else
     return rename(old_filename, new_filename) == 0;
+#endif
+}
+
+boolx os_file_handle_is_valid(File_Handle file_handle) {
+#if _WIN32
+    return file_handle.handle != NULL && file_handle != INVALID_HANDLE_VALUE; 
+#else
+    return file_handle.handle != NULL;
 #endif
 }
 

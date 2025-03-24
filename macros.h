@@ -48,4 +48,12 @@
 #define gigabytes_to_bytes(value) (megabytes_to_bytes(value) * 1024LLU)
 #define terabytes_to_bytes(value) (gigabytes_to_bytes(value) * 1024LLU)
 
+#ifndef thread_local
+#ifdef _WIN32
+#define thread_local __declspec(thread)
+#else
+#define thread_local __thread
+#endif
+#endif
+
 #endif // MACROS_H

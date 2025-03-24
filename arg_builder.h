@@ -46,7 +46,37 @@ typedef struct String_Builder_S {
     size_t len;
     size_t cap;
 } String_Builder;
+#endif
 
+#define ARG_BUILDER_INITAL_CAP 32
+typedef struct Arg_Builder_S {
+    const char** ptr;
+    size_t len;
+    size_t cap;
+} Arg_Builder;
+
+#ifdef _WIN32
+typedef struct {
+    PROCESS_INFORMATION pi;
+} AsyncProcessInfo;
+#else
+typedef int pid_t;
+typedef struct {
+    pid_t pid;
+} AsyncProcessInfo;
+#endif
+
+boolx   arg_builder_append_one(Arg_Builder *arg_builder, const char* c);
+void    arg_builder_append_impl(Arg_Builder *arg_builder, ...);
+#define arg_builder_append(arg_builder, ...) arg_builder_append_impl(arg_builder, __VA_ARGS__, NULL)
+void    arg_builder_concat(Arg_Builder *dest, Arg_Builder *src);
+void    arg_builder_render(Arg_Builder *arg_builder, String_Builder *out);
+void    arg_builder_clear (Arg_Builder *arg_builder);
+void    arg_builder_free  (Arg_Builder arg_builder);
+
+#if defined(CBUILD) || defined(ARG_BUILDER_IMPL)
+
+#ifndef STRING_BUILDER_H
 boolx string_builder_append_char(String_Builder* sb, const char c) {
     if (sb->len >= sb->cap) {
         sb->cap = sb->len == 0 ? STRING_BUILDER_INITAL_CAP : (sb->cap*2);
@@ -77,35 +107,6 @@ static void shell_escape(const char * str, String_Builder *out) {
     }
 }
 #endif // STRING_BUILDER_H
-
-#define ARG_BUILDER_INITAL_CAP 32
-typedef struct Arg_Builder_S {
-    const char** ptr;
-    size_t len;
-    size_t cap;
-} Arg_Builder;
-
-#ifdef _WIN32
-typedef struct {
-    PROCESS_INFORMATION pi;
-} AsyncProcessInfo;
-#else
-typedef int pid_t;
-typedef struct {
-    pid_t pid;
-} AsyncProcessInfo;
-#endif
-
-boolx   arg_builder_append_one(Arg_Builder *arg_builder, const char* c);
-void    arg_builder_append_impl(Arg_Builder *arg_builder, ...);
-#define arg_builder_append(arg_builder, ...) arg_builder_append_impl(arg_builder, __VA_ARGS__, NULL)
-void    arg_builder_concat(Arg_Builder *dest, Arg_Builder *src);
-void    arg_builder_render(Arg_Builder *arg_builder, String_Builder *out);
-void    arg_builder_reset(Arg_Builder *arg_builder);
-AsyncProcessInfo arg_builder_run_async (Arg_Builder *arg_builder);
-int     arg_builder_run_sync  (Arg_Builder *arg_builder);
-
-#if defined(CBUILD) || defined(ARG_BUILDER_IMPL)
 
 boolx arg_builder_append_one(Arg_Builder *arg_builder, const char* c) {
     if (arg_builder->len >= arg_builder->cap) {
@@ -141,18 +142,22 @@ void arg_builder_concat(Arg_Builder *dst, Arg_Builder *src) {
 }
 
 void arg_builder_render(Arg_Builder *arg_builder, String_Builder *out) {
-for (size_t item = 0; item < arg_builder->len; item++) {
-    const char* str = arg_builder->ptr[item];
-    shell_escape(str, out);
-    string_builder_append_char(out, ' ');
-}
+    for (size_t item = 0; item < arg_builder->len; item++) {
+        const char* str = arg_builder->ptr[item];
+        shell_escape(str, out);
+        string_builder_append_char(out, ' ');
+    }
 }
 
-void arg_builder_reset(Arg_Builder *arg_builder) {
+void arg_builder_clear(Arg_Builder *arg_builder) {
     if (arg_builder == NULL) return;
     if (arg_builder->ptr == NULL) return;
     memset(arg_builder->ptr, 0, arg_builder->cap);
     arg_builder->len = 0;
+}
+
+void arg_builder_free(Arg_Builder arg_builder) {
+    ARG_BUILDER_free(arg_builder.ptr);
 }
 
 #endif // ARG_BUILDER_IMPL

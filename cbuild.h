@@ -76,13 +76,21 @@
 #define gigabytes_to_bytes(value) (megabytes_to_bytes(value) * 1024LLU)
 #define terabytes_to_bytes(value) (gigabytes_to_bytes(value) * 1024LLU)
 
+#ifndef thread_local
+#ifdef _WIN32
+#define thread_local __declspec(thread)
+#else
+#define thread_local __thread
+#endif
+#endif
+
 #endif // MACROS_H
 
 #pragma region tmp_alloc.h
 /**
     @file tmp_alloc.h
-    @brief A fixed sized, thread local, non aligned, bump allocator.
-        good for string building and other non crticial allocations
+    @brief A fixed sized, thread local, word aligned, bump allocator.
+          good for string building and other non crticial allocations
 
     Dependencies:
     - LIBC: memcpy, memset
@@ -91,13 +99,13 @@
     Features:
     - thread independant allocation space.
     - allocate size of bytes from tmp_allocator.
-    - re/allocate size of bytes from tmp_allocator 
-    (only supports growing in size, not shrinking).
+    - re/allocate size of bytes from tmp_allocator
+      (only supports growing in size, not shrinking).
     - reset tmp_allocator to "clear" the allocations made and start fresh.
-    - calls to allocate that return NULL will set tmp_allocator_error
-    which can be stringified for printing with tmp_allocator_error_str(tmp_allocator_error)
-    - is a drop in replacement for stdlib's malloc/realloc/free 
-    (free is a noop for this and is likely optimized out in compilation)
+    - calls to allocate that return NULL will set tmp_allocator.error
+      which can be stringified for printing with tmp_allocator.error_str(tmp_allocator.error)
+    - is a drop in replacement for stdlib's malloc/realloc/free
+      (free is a noop for this and is likely optimized out in compilation)
 
     Documentation:
     Do this
@@ -149,7 +157,6 @@
 
 #include <stddef.h>
 #include <stdint.h>
-
 
 #if defined(CBUILD_memcpy)
 #define TMP_ALLOC_memcpy CBUILD_memcpy
@@ -213,21 +220,7 @@ typedef int boolx;
 #ifndef TMP_ALLOC_SIZE
 // enough to fit an undergraduate thesis.
 #define TMP_ALLOC_SIZE (2 << 15)
-#endif 
-
-struct Tmp_Allocator {
-    boolx    ready;
-    int      cursor;
-    uint8_t  buf[TMP_ALLOC_SIZE];
-};
-
-// we want to try and keep this alignment of processor.
-typedef struct Tmp_Allocator_Slot_S {
-    half_width_uint   size;
-    half_width_uint   ptr_offset;
-    half_width_uint   _unused_a;
-    half_width_uint   _unused_b;
-} Tmp_Allocator_Slot;
+#endif
 
 enum Tmp_Allocator_Error {
     Tmp_Allocator_Error_None = 0,
@@ -238,19 +231,33 @@ enum Tmp_Allocator_Error {
     Tmp_Allocator_Error_Out_Of_Bounds,
 };
 
+struct Tmp_Allocator {
+    boolx                    ready;
+    int                      cursor;
+    uint8_t                  buf[TMP_ALLOC_SIZE];
+    enum Tmp_Allocator_Error error;
+};
+
+// we want to try and keep this alignment of processor.
+typedef struct Tmp_Allocator_Slot_S {
+    half_width_uint   size;
+    half_width_uint   ptr_offset; 
+} Tmp_Allocator_Slot;
+
+
 void  tmp_allocator_reset(void);
 void* tmp_alloc(size_t size);
 void* tmp_realloc(void *ptr, size_t size);
 void  tmp_free(void *ptr);
 const char* tmp_allocator_error_str(enum Tmp_Allocator_Error err);
 
+
 #if defined(CBUILD) || defined(TMP_ALLOC_IMPL)
 
 thread_local struct Tmp_Allocator       tmp_allocator;
-thread_local enum   Tmp_Allocator_Error tmp_allocator_error;
 
 static Tmp_Allocator_Slot *unsafe_slot_at_offset(size_t offset) {
-    return (Tmp_Allocator_Slot*)((uint8_t*)tmp_allocator.buf + offset);
+    return (Tmp_Allocator_Slot*)((uintptr_t)tmp_allocator.buf + offset);
 }
 
 void reset_tmp_allocator(void) {
@@ -259,69 +266,81 @@ void reset_tmp_allocator(void) {
 }
 
 void* tmp_alloc(size_t size) {
-    
+
     if (!tmp_allocator.ready) {
         reset_tmp_allocator();
     }
-    
-    size_t remaining_space = (TMP_ALLOC_SIZE - tmp_allocator.cursor) - sizeof(Tmp_Allocator_Slot);
+
+    size_t alignment = sizeof(uintptr_t);
+    size_t current_cursor = tmp_allocator.cursor;
+
+    // Align the cursor for the data allocation
+    size_t alignment_padding = (alignment - (current_cursor % alignment)) % alignment;
+    current_cursor += alignment_padding;
+
+    size_t remaining_space = (TMP_ALLOC_SIZE - current_cursor) - sizeof(Tmp_Allocator_Slot);
     if (remaining_space < size) {
-        tmp_allocator_error = Tmp_Allocator_Error_Out_Of_Memory;
+        tmp_allocator.error = Tmp_Allocator_Error_Out_Of_Memory;
         return NULL;
     }
-    
-    Tmp_Allocator_Slot* slot = unsafe_slot_at_offset(tmp_allocator.cursor);
-    tmp_allocator.cursor += sizeof(Tmp_Allocator_Slot);
-    
+
+    Tmp_Allocator_Slot* slot = unsafe_slot_at_offset(current_cursor);
+    size_t data_ptr_offset = current_cursor + sizeof(Tmp_Allocator_Slot);
+
+    // Ensure enough space for the slot and the data
+    if (data_ptr_offset + size > TMP_ALLOC_SIZE) {
+        tmp_allocator.error = Tmp_Allocator_Error_Out_Of_Memory;
+        return NULL;
+    }
+
     slot->size = size;
-    slot->ptr_offset = tmp_allocator.cursor;
-    
-    uint8_t* result = tmp_allocator.buf + tmp_allocator.cursor;
-    tmp_allocator.cursor += size;
-    
-    return (void*)result;
+    slot->ptr_offset = data_ptr_offset;
+
+    tmp_allocator.cursor = data_ptr_offset + size;
+
+    return (void*)(tmp_allocator.buf + data_ptr_offset);
 }
 
 void* tmp_realloc(void* ptr, size_t new_size) {
-    
+
     if (!tmp_allocator.ready) {
         reset_tmp_allocator();
     }
-    
+
     if (ptr == NULL) {
         return tmp_alloc(new_size);
     }
-    
+
     //  check that the given pointer in within bounds of allocator.
-    if ((uint8_t*)ptr < tmp_allocator.buf) {
-        tmp_allocator_error = Tmp_Allocator_Error_Out_Of_Bounds;
+    if ((uintptr_t)ptr < (uintptr_t)tmp_allocator.buf) {
+        tmp_allocator.error = Tmp_Allocator_Error_Out_Of_Bounds;
         return NULL;
     }
-    
+
     //  check that the given pointer in within bounds of allocator.
-    if ((uint8_t*)ptr > (tmp_allocator.buf + TMP_ALLOC_SIZE - 1)){
-        tmp_allocator_error = Tmp_Allocator_Error_Out_Of_Bounds;
+    if ((uintptr_t)ptr > ((uintptr_t)tmp_allocator.buf + TMP_ALLOC_SIZE - 1)){
+        tmp_allocator.error = Tmp_Allocator_Error_Out_Of_Bounds;
         return NULL;
     }
-    
+
     if (tmp_allocator.cursor == 0) {
         return tmp_alloc(new_size);
     }
-    
-    int ptr_offset  = ((uint8_t*)ptr) - ((uint8_t*)tmp_allocator.buf);
-    int slot_offset = ptr_offset - sizeof(Tmp_Allocator_Slot);
+
+    uintptr_t ptr_offset   = (uintptr_t)ptr - (uintptr_t)tmp_allocator.buf;
+    uintptr_t slot_offset = ptr_offset - sizeof(Tmp_Allocator_Slot);
     Tmp_Allocator_Slot* slot = unsafe_slot_at_offset(slot_offset);
-    
+
     // check that the new size is bigger than existing size.
     if (new_size <= slot->size) {
-        tmp_allocator_error = Tmp_Allocator_Error_Realloc_Smaller;
+        tmp_allocator.error = Tmp_Allocator_Error_Realloc_Smaller;
         return NULL;
     }
-    
+
     int slot_end = slot_offset + sizeof(Tmp_Allocator_Slot) + slot->size;
     // if we are the last allocated ptr we can grow
     if (slot_end == tmp_allocator.cursor) {
-        int to_add = (new_size - slot->size);
+        size_t to_add = (new_size - slot->size);
         slot->size = new_size;
         tmp_allocator.cursor += to_add;
         return ptr;
@@ -329,7 +348,7 @@ void* tmp_realloc(void* ptr, size_t new_size) {
     // otherwise we need to allocate new space and copy.
     void* new_ptr = tmp_alloc(new_size);
     if (new_ptr == NULL) {
-        tmp_allocator_error = Tmp_Allocator_Error_Out_Of_Memory;
+        tmp_allocator.error = Tmp_Allocator_Error_Out_Of_Memory;
         return NULL;
     }
     TMP_ALLOC_memcpy(new_ptr, ptr, slot->size);
@@ -338,10 +357,11 @@ void* tmp_realloc(void* ptr, size_t new_size) {
 }
 
 void tmp_free(void *ptr) {
+    if (ptr == NULL) return; // Handle NULL pointer
 
-    int ptr_offset  = ((uint8_t*)ptr) - ((uint8_t*)tmp_allocator.buf);
-    int slot_offset = ptr_offset - sizeof(Tmp_Allocator_Slot);
-    Tmp_Allocator_Slot* slot = unsafe_slot_at_offset(slot_offset); 
+    uintptr_t ptr_offset     = (uintptr_t)ptr - (uintptr_t)tmp_allocator.buf;
+    uintptr_t slot_offset    = ptr_offset - sizeof(Tmp_Allocator_Slot);
+    Tmp_Allocator_Slot* slot = unsafe_slot_at_offset(slot_offset);
 
     int slot_end = slot_offset + sizeof(Tmp_Allocator_Slot) + slot->size;
     // if we are the last allocated ptr we can grow
@@ -353,7 +373,7 @@ void tmp_free(void *ptr) {
 }
 
 const char* tmp_allocator_error_str(enum Tmp_Allocator_Error err) {
-    const char* error_strs[] = {
+    const char* error_strs[]= {
         "none",
         "out of memory",
         "realloc smaller than previous size",
@@ -363,11 +383,70 @@ const char* tmp_allocator_error_str(enum Tmp_Allocator_Error err) {
     return error_strs[err];
 }
 
-
 #endif // TMP_ALLOC_IMPL
 #endif // TMP_ALLOC_H
 
 #pragma region string_builder.h
+/**
+    @file string_builder.h
+    @brief 
+
+    Dependencies:
+    - (Optional & Default) LIBC: realloc, free, memcpy, fprintf
+
+    Features:
+    - 0 initialized String_Builder works out of the box
+
+
+    Documentation:
+    Do this
+        #define STRING_BUILDER_IMPL
+    before you include this file in *one* C or C++ file to create the implementation.
+
+    1. it should look like this:
+    ```c
+    #define STRING_BUILDER_IMPL
+    #include "string_builder.h"
+    ```
+
+    2. string builder depends on two procs from stdlib (realloc and free).
+       this can be overriden by two defines. 
+    ```c
+    #define STRING_BUILDER_realloc myrealloc
+    #define STRING_BUILDER_free myfree
+    ```
+
+    @nickname Woody
+    @author Edward Briggs (woody@ebrb.ltd)
+    @date 2025-02-23 T 16:43:00+08:00
+
+    @copyright Copyright (c) 2025 Edward Briggs
+
+    @license
+    This header file is distributed under the MIT License.
+
+    Copyright (c) 2025 Edward Briggs
+
+    Permission is hereby granted, free of charge, to any person obtaining a copy
+    of this software and associated documentation files (the "Software"), to deal
+    in the Software without restriction, including without limitation the rights
+    to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+    copies of the Software, and to permit persons to whom the Software is
+    furnished to do so, subject to the following conditions:
+
+    The above copyright notice and this permission notice shall be included in all
+    copies or substantial portions of the Software.
+
+    THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+    IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+    FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+    AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+    LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+    OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+    SOFTWARE.
+*/
+
+
 #ifndef STRING_BUILDER_H
 #define STRING_BUILDER_H
 
@@ -391,13 +470,6 @@ typedef int boolx;
 #define STRING_BUILDER_INITAL_CAP 1024
 #endif // STRING_BUILDER_INITAL_CAP
 
-#if defined(CBUILD_alloc)
-#define STRING_BUILDER_alloc CBUILD_alloc
-#elif !defined(STRING_BUILDER_alloc)
-#include <stdlib.h>
-#define STRING_BUILDER_alloc malloc
-#endif
-
 #if defined(CBUILD_realloc)
 #define STRING_BUILDER_realloc CBUILD_realloc
 #elif !defined(STRING_BUILDER_realloc)
@@ -411,6 +483,21 @@ typedef int boolx;
 #include <stdlib.h>
 #define STRING_BUILDER_free free
 #endif
+
+#if defined(CBUILD_memcpy)
+#define STRING_BUILDER_memcpy CBUILD_memcpy
+#elif !defined(STRING_BUILDER_memcpy)
+#include <string.h>
+#define STRING_BUILDER_memcpy memcpy
+#endif
+
+#if defined(CBUILD_fprintf)
+#define STRING_BUILDER_fprintf CBUILD_fprintf
+#elif !defined(STRING_BUILDER_fprintf)
+#include <stdio.h>
+#define STRING_BUILDER_fprintf fprintf
+#endif
+
 
 
 typedef struct String_Builder_S {
@@ -429,7 +516,7 @@ void  string_builder_to_cstr(String_Builder *sb, char *cstr, size_t len);
 
 void  shell_escape(const char * str, String_Builder *out);
 
-#if defined(CBUILD) || defined(STRING_BUILDER_IMPL) 
+#if defined(CBUILD) || defined(STRING_BUILDER_IMPL)
 
 boolx string_builder_append_char(String_Builder* sb, const char c) {
     if (sb->len >= sb->cap) {
@@ -484,7 +571,7 @@ void string_builder_to_cstr(String_Builder *sb, char *cstr, size_t len) {
     if (cstr == NULL) return;
     if (sb->len > len) return;
 
-    memcpy(cstr, sb->ptr, sb->len); 
+    STRING_BUILDER_memcpy(cstr, sb->ptr, sb->len); 
     return;
 }
 
@@ -540,7 +627,37 @@ typedef struct String_Builder_S {
     size_t len;
     size_t cap;
 } String_Builder;
+#endif
 
+#define ARG_BUILDER_INITAL_CAP 32
+typedef struct Arg_Builder_S {
+    const char** ptr;
+    size_t len;
+    size_t cap;
+} Arg_Builder;
+
+#ifdef _WIN32
+typedef struct {
+    PROCESS_INFORMATION pi;
+} AsyncProcessInfo;
+#else
+typedef int pid_t;
+typedef struct {
+    pid_t pid;
+} AsyncProcessInfo;
+#endif
+
+boolx   arg_builder_append_one(Arg_Builder *arg_builder, const char* c);
+void    arg_builder_append_impl(Arg_Builder *arg_builder, ...);
+#define arg_builder_append(arg_builder, ...) arg_builder_append_impl(arg_builder, __VA_ARGS__, NULL)
+void    arg_builder_concat(Arg_Builder *dest, Arg_Builder *src);
+void    arg_builder_render(Arg_Builder *arg_builder, String_Builder *out);
+void    arg_builder_clear (Arg_Builder *arg_builder);
+void    arg_builder_free  (Arg_Builder arg_builder);
+
+#if defined(CBUILD) || defined(ARG_BUILDER_IMPL)
+
+#ifndef STRING_BUILDER_H
 boolx string_builder_append_char(String_Builder* sb, const char c) {
     if (sb->len >= sb->cap) {
         sb->cap = sb->len == 0 ? STRING_BUILDER_INITAL_CAP : (sb->cap*2);
@@ -571,35 +688,6 @@ static void shell_escape(const char * str, String_Builder *out) {
     }
 }
 #endif // STRING_BUILDER_H
-
-#define ARG_BUILDER_INITAL_CAP 32
-typedef struct Arg_Builder_S {
-    const char** ptr;
-    size_t len;
-    size_t cap;
-} Arg_Builder;
-
-#ifdef _WIN32
-typedef struct {
-    PROCESS_INFORMATION pi;
-} AsyncProcessInfo;
-#else
-typedef int pid_t;
-typedef struct {
-    pid_t pid;
-} AsyncProcessInfo;
-#endif
-
-boolx   arg_builder_append_one(Arg_Builder *arg_builder, const char* c);
-void    arg_builder_append_impl(Arg_Builder *arg_builder, ...);
-#define arg_builder_append(arg_builder, ...) arg_builder_append_impl(arg_builder, __VA_ARGS__, NULL)
-void    arg_builder_concat(Arg_Builder *dest, Arg_Builder *src);
-void    arg_builder_render(Arg_Builder *arg_builder, String_Builder *out);
-void    arg_builder_reset(Arg_Builder *arg_builder);
-AsyncProcessInfo arg_builder_run_async (Arg_Builder *arg_builder);
-int     arg_builder_run_sync  (Arg_Builder *arg_builder);
-
-#if defined(CBUILD) || defined(ARG_BUILDER_IMPL)
 
 boolx arg_builder_append_one(Arg_Builder *arg_builder, const char* c) {
     if (arg_builder->len >= arg_builder->cap) {
@@ -635,18 +723,22 @@ void arg_builder_concat(Arg_Builder *dst, Arg_Builder *src) {
 }
 
 void arg_builder_render(Arg_Builder *arg_builder, String_Builder *out) {
-for (size_t item = 0; item < arg_builder->len; item++) {
-    const char* str = arg_builder->ptr[item];
-    shell_escape(str, out);
-    string_builder_append_char(out, ' ');
-}
+    for (size_t item = 0; item < arg_builder->len; item++) {
+        const char* str = arg_builder->ptr[item];
+        shell_escape(str, out);
+        string_builder_append_char(out, ' ');
+    }
 }
 
-void arg_builder_reset(Arg_Builder *arg_builder) {
+void arg_builder_clear(Arg_Builder *arg_builder) {
     if (arg_builder == NULL) return;
     if (arg_builder->ptr == NULL) return;
     memset(arg_builder->ptr, 0, arg_builder->cap);
     arg_builder->len = 0;
+}
+
+void arg_builder_free(Arg_Builder arg_builder) {
+    ARG_BUILDER_free(arg_builder.ptr);
 }
 
 #endif // ARG_BUILDER_IMPL
@@ -656,6 +748,7 @@ void arg_builder_reset(Arg_Builder *arg_builder) {
 #ifndef OS_HELPERS_H
 #define OS_HELPERS_H
 
+#include <_stdio.h>
 #include <stdio.h>
 #include <string.h>
 
@@ -709,6 +802,7 @@ typedef struct File_Handle_S {
     #endif
 } File_Handle;
 
+boolx         os_file_handle_is_valid   (File_Handle file_handle);
 File_Handle   os_open_file_for_read     (const char *filename);
 File_Handle   os_open_file_for_write    (const char *filename);
 boolx         os_close_file             (File_Handle file_handle);
@@ -781,6 +875,14 @@ boolx os_move_file(const char *old_filename, const char *new_filename) {
     return MoveFileExA(old_filename, new_filename, MOVEFILE_REPLACE_EXISTING);
 #else
     return rename(old_filename, new_filename) == 0;
+#endif
+}
+
+boolx os_file_handle_is_valid(File_Handle file_handle) {
+#if _WIN32
+    return file_handle.handle != NULL && file_handle != INVALID_HANDLE_VALUE; 
+#else
+    return file_handle.handle != NULL;
 #endif
 }
 
@@ -1058,6 +1160,9 @@ boolx os_read_entire_file(File_Handle file_handle, const char *filename, Char_Bu
 #ifndef OS_PATH_H
 #define OS_PATH_H
 
+#include <string.h>
+#include <stdio.h>
+
 #if defined(CBUILD_alloc)
 #define OS_PATH_alloc CBUILD_alloc
 #elif !defined(OS_PATH_alloc)
@@ -1113,10 +1218,10 @@ typedef struct {
 } Os_Path;
 
 // create a new Os_Path with default Unix style
-Os_Path os_path_create(char *path);
+Os_Path os_path_create(const char *path);
 
 // create a new Os_Path with specified style, this will convert incoming path to pathstyle if needed
-Os_Path os_path_create_styled(char *path, Os_Path_Style style);
+Os_Path os_path_create_styled(const char *path, Os_Path_Style style);
 
 // clones path will allocate and copy the path str too.
 Os_Path os_path_clone(const Os_Path fp);
@@ -1180,11 +1285,11 @@ static boolx _convert_to_windows_style(char *path) {
     return true;
 }
 
-Os_Path os_path_create(char *path) {
+Os_Path os_path_create(const char *path) {
     return os_path_create_styled(path, SYSTEM_PATH_STYLE);
 }
 
-Os_Path os_path_create_styled(char *path, Os_Path_Style style) {
+Os_Path os_path_create_styled(const char *path, Os_Path_Style style) {
     Os_Path result = {0};
     if (path == NULL) return result;
 
@@ -1335,11 +1440,13 @@ Os_Path os_path_escape(Os_Path *fp) {
 #pragma region c_compiler.h
 #ifndef C_COMPILER_H
 #define C_COMPILER_H
+#include <assert.h>
 
+#include "tmp_alloc.h"
+#include "fmt_string.h"
 #include "os_path.h"
 #include "string_builder.h"
 #include "arg_builder.h"
-
 
 #if defined(CBUILD_alloc)
 #define C_COMPILER_alloc CBUILD_alloc
@@ -1364,7 +1471,7 @@ Os_Path os_path_escape(Os_Path *fp) {
 
 typedef enum C_Compiler_E {
     C_Compiler_Unsupported = 0,
-    C_Compiler_Clang = 1, 
+    C_Compiler_Clang = 1,
     C_Compiler_Gcc = 2,
     C_Compiler_Msvc = 3, 
 } C_Compiler;
@@ -1384,11 +1491,44 @@ typedef enum C_Compiler_Standard_E {
     C_Compiler_Standard_C23 = 5,
 
     C_Compiler_Standard_CPP11 = 6,
+
+    C_Compiler_Standard_MAX,
 } C_Compiler_Standard;
 
+const char *c_compiler_standard_flag_str(C_Compiler c_compiler, C_Compiler_Standard std) {
+    if (c_compiler == C_Compiler_Clang || c_compiler == C_Compiler_Gcc) {
+        const char *table[C_Compiler_Standard_MAX] = {
+            "", // default of compiler
+            "-std=c89",
+            "-std=c99",
+            "-std=c11",
+            "-std=c17",
+            "-std=c23",
+            "-std=c++11"
+        };
+        assert((int) std < C_Compiler_Standard_MAX);
+        return table[std];
+    }
+    else if (c_compiler == C_Compiler_Msvc) {
+        const char *table[C_Compiler_Standard_MAX] = {
+            "", // default of compiler
+            "", // unsupported in msvc "/std:c89",
+            "", // unsupported in msvc "/std:c99",
+            "/std:c11",
+            "/std:c17",
+            "/std:c23",
+            "/std:c++11"
+        };
+        assert((int) std < (int)C_Compiler_Standard_MAX);
+        return table[std];
+    }
+    
+    return NULL;
+}
+
 typedef enum C_Compiler_Warning_Level_E {
-    C_Compiler_Warning_Level_None = 0, // disable all warnings
-    C_Compiler_Warning_Level_Default,  // the default of the compiler
+    C_Compiler_Warning_Level_Default = 0,  // the default of the compiler
+    C_Compiler_Warning_Level_None = 1, // disable all warnings
     C_Compiler_Warning_Level_Strict,   // msvc /Wall - clang/gcc -Wall -Wextra -Wpedantic -Werror
 } C_Compiler_Warning_Level;
 
@@ -1416,32 +1556,6 @@ typedef enum C_Compiler_Output_Type_E {
     C_Compiler_Output_Type_Object
 } C_Compiler_Output_Type;
 
-typedef struct C_Compiler_Output_Executable_S {
-    const char *filename;
-} C_Compiler_Output_Executable;
-
-typedef struct C_Compiler_Output_Library_S {
-    const char *filename;
-} C_Compiler_Output_Library;
-
-typedef struct C_Compiler_Output_Object_S {
-    const char *filename;
-} C_Compiler_Output_Object;
-
-typedef struct C_Compiler_Output_S {
-    C_Compiler_Output_Type type;
-
-    boolx debug_symbols;
-
-    const char *artifact_directory;
-
-    union {
-        C_Compiler_Output_Executable exe_options;
-        C_Compiler_Output_Library    lib_options;
-        C_Compiler_Output_Object     obj_options;
-    } options;
-
-} C_Compiler_Output;
 
 typedef struct C_Compiler_Options_S {
     C_Compiler_Preprocessor_Defines         preprocessor_defines;
@@ -1453,7 +1567,11 @@ typedef struct C_Compiler_Options_S {
     C_Compiler_Link_Library_Search_Paths    library_search_paths;
     C_Compiler_Link_Libraries               libraries;
 
-    C_Compiler_Output                       output;
+    
+    C_Compiler_Output_Type                  output_type;
+    boolx                                   output_debug_symbols;
+    const char                             *output_artifact_directory;
+    const char                             *output_filename;
 
     struct String_Array_S                   other_compiler_flags;
     struct String_Array_S                   other_linker_flags;
@@ -1462,7 +1580,7 @@ typedef struct C_Compiler_Options_S {
 
 boolx c_compiler_compile_translation_unit(Arg_Builder *arg_builder, C_Compiler c_compiler, C_Compiler_Options options, const char *c_filename);
 
-#if defined(CBUILD) || defined(C_COMPILER_IMPL)
+#if defined(CBUILD) || defined(C_COMPILER_IMPL) || 1
 
 #ifdef __clang__
 const C_Compiler C_COMPILER_ENUM = C_Compiler_Clang;
@@ -1504,94 +1622,47 @@ boolx c_compiler_render_debug_symbols_flag(Arg_Builder *arg_builder, C_Compiler 
     if (!output_debug_symbols) {
         return true;
     }
-    switch (c_compiler) {
-        case C_Compiler_Clang:
-        case C_Compiler_Gcc: {
-            arg_builder_append_one(arg_builder, "-g");
-            return true;
-        }
-        break;
-        case C_Compiler_Msvc: {
-            arg_builder_append_one(arg_builder, "/ZI");
-            return true;
-        }
-        break;
-        default: {
-            fprintf(stderr, "c compiler render debug symbols flag: unsupported compiler: %s\n", c_compiler_str(c_compiler));
-            return false;
-        }
+
+    if (c_compiler == C_Compiler_Clang || c_compiler == C_Compiler_Gcc) {
+        arg_builder_append_one(arg_builder, "-g");
+        return true;
     }
+    else if (c_compiler == C_Compiler_Msvc) {
+        arg_builder_append_one(arg_builder, "/ZI");
+        return true;
+    }
+    
+    fprintf(stderr, "c compiler render debug symbols flag: unsupported compiler: %s\n", c_compiler_str(c_compiler));
+    return false;
 }
 
 boolx c_compiler_render_std(Arg_Builder *arg_builder, C_Compiler c_compiler, C_Compiler_Standard std) {
     if (std == C_Compiler_Standard_Default) {
         return true;
     }
-    switch (c_compiler) {
-        case C_Compiler_Clang:
-        case C_Compiler_Gcc: {
-            const char *table[] = {
-                "",
-                "-std=c89",
-                "-std=c99",
-                "-std=c11",
-                "-std=c17",
-                "-std=c23",
-                "-std=c++11"
-            };
-            const char *std_str = table[std];
-            arg_builder_append_one(arg_builder, std_str);
-            return true;
-        }
-        break;
-        case C_Compiler_Msvc: {
-            const char *table[] = {
-                "",
-                "", // unsupported in msvc "/std:c89",
-                "", // unsupported in msvc "/std:c99",
-                "/std:c11",
-                "/std:c17",
-                "/std:c23",
-                "/std:c++11"
-            };
-            const char *std_str = table[std];
-            arg_builder_append_one(arg_builder, std_str);
-            return true;
-        }
-        break;
-        default: {
-            fprintf(stderr, "c compiler render std flag: unsupported compiler: %s\n", c_compiler_str(c_compiler));
-            return false;
-        }
+    const char *std_str = c_compiler_standard_flag_str(c_compiler, std);
+    if (std_str == NULL) {
+        fprintf(stderr, "c compiler render std: unknown std %d\n", std);
+        return false;
     }
+    arg_builder_append_one(arg_builder, std_str);
+    return true;
 }
 
 boolx c_compiler_render_warning_level(Arg_Builder *arg_builder, C_Compiler c_compiler, C_Compiler_Warning_Level warning_level) {
     if (c_compiler == C_Compiler_Clang || c_compiler == C_Compiler_Gcc) {
         switch (warning_level) {
-        case C_Compiler_Warning_Level_None: 
-            arg_builder_append_one(arg_builder, "-w"); 
-        break;
-        case C_Compiler_Warning_Level_Strict: 
-            arg_builder_append(arg_builder, "-Wall", "-Wextra", "-Wpedantic", "-Werror");
-        break;
-        default:
-            // nothing to add to thearg_builder 
-        break;
+            case C_Compiler_Warning_Level_None: arg_builder_append_one(arg_builder, "-w"); break;
+            case C_Compiler_Warning_Level_Strict: arg_builder_append(arg_builder, "-Wall", "-Wextra", "-Wpedantic", "-Werror"); break;
+            default: /* nothing to add to the arg_builder  */ break; 
         }
         return true;
     }
     else if (c_compiler == C_Compiler_Msvc) {
         switch (warning_level) {
-        case C_Compiler_Warning_Level_None: 
-            arg_builder_append_one(arg_builder, "/w"); 
-        break;
-        case C_Compiler_Warning_Level_Strict: 
-            arg_builder_append(arg_builder, "/W4", "/WX"); 
-        break;
-        default: {
-            // nothing to add to thearg_builder 
-        } break;
+            case C_Compiler_Warning_Level_None: arg_builder_append_one(arg_builder, "/w"); break;
+            case C_Compiler_Warning_Level_Strict: arg_builder_append(arg_builder, "/W4", "/WX"); break;
+            default: /* nothing to add to the arg_builder  */ break;
         }
         return true;
     }
@@ -1614,25 +1685,20 @@ boolx c_compiler_render_preprocessor_defines(Arg_Builder *arg_builder, C_Compile
     }
 
     for (size_t i = 0; i < defines.count; ++i) {
-        String_Builder defined = {0};
 
+        const char *flag = 0;
         if (c_compiler == C_Compiler_Clang || c_compiler == C_Compiler_Gcc) {
-            string_builder_append_char(&defined, '-');
+            fmt_string(&flag, "-D%s", defines.data[i]);
         }
         else if (c_compiler == C_Compiler_Msvc) {
-            string_builder_append_char(&defined, '/');
+            fmt_string(&flag, "/D%s", defines.data[i]);
         }
         else {
             fprintf(stderr, "unreachable: c compiler render preprocessor defines: unsupported c compiler: %s\n", c_compiler_str(c_compiler));
-            string_builder_free(&defined);
             continue;
-        }
+        } 
 
-        string_builder_append_char(&defined, 'D');
-        string_builder_append_cstr(&defined, defines.data[i]);
-        string_builder_append_null(&defined);
-
-        arg_builder_append_one(arg_builder, defined.ptr);
+        arg_builder_append_one(arg_builder, flag);
     }
 
     return true;
@@ -1652,27 +1718,21 @@ boolx c_compiler_render_header_search_paths(Arg_Builder *arg_builder, C_Compiler
     }
 
     for (size_t i = 0; i < header_search_paths.count; ++i) {
-        String_Builder defined = {0};
 
+        const char *flag = 0;
         if (c_compiler == C_Compiler_Clang || c_compiler == C_Compiler_Gcc) {
-            string_builder_append_char(&defined, '-');
             os_path_set_style(header_search_paths.data + i, OS_PATH_STYLE_UNIX);
+            fmt_string(&flag, "-I%s", header_search_paths.data + i);
         }
         else if (c_compiler == C_Compiler_Msvc) {
-            string_builder_append_char(&defined, '/');
-            os_path_set_style(header_search_paths.data + i, OS_PATH_STYLE_WINDOWS);
+            fmt_string(&flag, "/I\"%s\"", header_search_paths.data + i);
         }
         else {
             fprintf(stderr, "unreachable: c compiler render header search paths: unsupported c compiler: %s\n", c_compiler_str(c_compiler));
-            string_builder_free(&defined);
             continue;
         }
 
-        string_builder_append_char(&defined, 'I');
-        string_builder_append_cstr(&defined, header_search_paths.data[i].path);
-        string_builder_append_null(&defined);
-
-        arg_builder_append_one(arg_builder, defined.ptr);
+        arg_builder_append_one(arg_builder, flag);
     }
 
     return true;
@@ -1691,25 +1751,21 @@ boolx c_compiler_render_library_search_paths(Arg_Builder *arg_builder, C_Compile
     }
 
     for (size_t i = 0; i < library_search_paths.count; ++i) {
-        String_Builder defined = {0};
-
+        const char *flag = 0;
         if (c_compiler == C_Compiler_Clang || c_compiler == C_Compiler_Gcc) {
-            string_builder_append_cstr(&defined, "-L");
-            os_path_set_style(&library_search_paths.data[i], OS_PATH_STYLE_UNIX);
+            os_path_set_style(library_search_paths.data + i, OS_PATH_STYLE_UNIX);
+            fmt_string(&flag, "-L%s", library_search_paths.data[i]);
         }
         else if (c_compiler == C_Compiler_Msvc) {
-            string_builder_append_cstr(&defined, "/LIBPATH:");
-            os_path_set_style(&library_search_paths.data[i], OS_PATH_STYLE_WINDOWS);
+            os_path_set_style(library_search_paths.data + i, OS_PATH_STYLE_WINDOWS);
+            fmt_string(&flag, "/LIBPATH:\"%s\"", library_search_paths.data[i]);
         }
         else {
             fprintf(stderr, "unreachable: c compiler render library search paths: unsupported c compiler: %s\n", c_compiler_str(c_compiler));
-            string_builder_free(&defined);
             continue;
         }
 
-        string_builder_append_cstr(&defined, library_search_paths.data[i].path);
-        string_builder_append_null(&defined);
-        arg_builder_append_one(arg_builder, defined.ptr);
+        arg_builder_append_one(arg_builder, flag);
     }
 
     return true;
@@ -1786,7 +1842,7 @@ boolx c_compiler_render_other_flags(Arg_Builder *arg_builder, C_Compiler c_compi
 
 boolx c_compiler_render_linker_options(Arg_Builder *arg_builder, C_Compiler c_compiler, C_Compiler_Options options) {
     if (c_compiler == C_Compiler_Msvc) {
-        if (options.output.debug_symbols) {
+        if (options.output_debug_symbols) {
             arg_builder_append_one(arg_builder, "/DEBUG");
         }
     }
@@ -1820,7 +1876,7 @@ boolx c_compiler_render_compiler_options(Arg_Builder *arg_builder, C_Compiler c_
         return false;
     }
 
-    if (!c_compiler_render_debug_symbols_flag(arg_builder, c_compiler, options.output.debug_symbols)) {
+    if (!c_compiler_render_debug_symbols_flag(arg_builder, c_compiler, options.output_debug_symbols)) {
         return false;
     }
 
@@ -1843,10 +1899,10 @@ boolx c_compiler_render_compiler_options(Arg_Builder *arg_builder, C_Compiler c_
     return true;
 }
 
-boolx c_compiler_render_output_executable(Arg_Builder *compiler_cmd, Arg_Builder *linker_cmd, C_Compiler c_compiler, C_Compiler_Output out_opts, C_Compiler_Output_Executable exe_opts) {
+boolx c_compiler_render_output_executable(Arg_Builder *compiler_cmd, Arg_Builder *linker_cmd, C_Compiler c_compiler, C_Compiler_Options options) {
     (void) compiler_cmd;
     if (c_compiler == C_Compiler_Clang || c_compiler == C_Compiler_Gcc) {
-        arg_builder_append(linker_cmd, "-o", exe_opts.filename);
+        arg_builder_append(linker_cmd, "-o", options.output_filename);
         return true;
     }
     else if (c_compiler == C_Compiler_Msvc) {
@@ -1855,7 +1911,7 @@ boolx c_compiler_render_output_executable(Arg_Builder *compiler_cmd, Arg_Builder
         // .obj file destination
         string_builder_append_cstr(&sb, "/Fo:");
         string_builder_append_char(&sb, '\"');
-        string_builder_append_cstr(&sb, out_opts.artifact_directory);
+        string_builder_append_cstr(&sb, options.output_artifact_directory);
         string_builder_append_char(&sb, '\"');
         string_builder_append_null(&sb);
         char *artifact_dir_cstr = (char *)C_COMPILER_alloc(sb.len);
@@ -1866,7 +1922,7 @@ boolx c_compiler_render_output_executable(Arg_Builder *compiler_cmd, Arg_Builder
         // .exe file destination
         string_builder_append_cstr(&sb, "/out:");
         string_builder_append_char(&sb, '\"');
-        string_builder_append_cstr(&sb, exe_opts.filename);
+        string_builder_append_cstr(&sb, options.output_filename);
         string_builder_append_char(&sb, '\"');
         string_builder_append_null(&sb);
         char *outflag_cstr = (char *) C_COMPILER_alloc(sb.len);
@@ -1882,37 +1938,36 @@ boolx c_compiler_render_output_executable(Arg_Builder *compiler_cmd, Arg_Builder
     }
 }
 
-boolx c_compiler_render_output_dynamic_lib(Arg_Builder *compiler_cmd, Arg_Builder *linker_cmd, C_Compiler c_compiler, C_Compiler_Output out_opts, C_Compiler_Output_Library lib_opts) {
+boolx c_compiler_render_output_dynamic_lib(Arg_Builder *compiler_cmd, Arg_Builder *linker_cmd, C_Compiler c_compiler, C_Compiler_Options options) {
     (void) compiler_cmd;
-    (void) out_opts;
     if (c_compiler == C_Compiler_Clang || c_compiler == C_Compiler_Gcc) {
-        if (lib_opts.filename != NULL) {
-            arg_builder_append(linker_cmd, "-o", lib_opts.filename);
+        if (options.output_filename != NULL) {
+            arg_builder_append(linker_cmd, "-o", options.output_filename);
         }
         return true;
     }
     return true;
 }
 
-boolx c_compiler_render_output_object(Arg_Builder *compiler_cmd, Arg_Builder *linker_cmd, C_Compiler c_compiler, C_Compiler_Output out_opts, C_Compiler_Output_Object obj_opts) {
+boolx c_compiler_render_output_object(Arg_Builder *compiler_cmd, Arg_Builder *linker_cmd, C_Compiler c_compiler, C_Compiler_Options options) {
     (void)(linker_cmd);
     String_Builder sb = {0};
     if (c_compiler == C_Compiler_Clang || c_compiler == C_Compiler_Gcc) {
         arg_builder_append(compiler_cmd, "-c");
-        if (out_opts.artifact_directory) {
-            arg_builder_append(compiler_cmd, "-o", out_opts.artifact_directory);
+        if (options.output_artifact_directory) {
+            arg_builder_append(compiler_cmd, "-o", options.output_artifact_directory);
         }
-        else if (obj_opts.filename) {
-            arg_builder_append(compiler_cmd, "-o", obj_opts.filename);
+        else if (options.output_filename) {
+            arg_builder_append(compiler_cmd, "-o", options.output_filename);
         }
     }
     else if (c_compiler == C_Compiler_Msvc) {
         arg_builder_append(compiler_cmd, "/c");
-        if (out_opts.artifact_directory) {
+        if (options.output_artifact_directory) {
             // .obj file destination
             string_builder_append_cstr(&sb, "/Fo:");
             string_builder_append_char(&sb, '\"');
-            string_builder_append_cstr(&sb, out_opts.artifact_directory);
+            string_builder_append_cstr(&sb, options.output_artifact_directory);
             string_builder_append_char(&sb, '\"');
             string_builder_append_null(&sb);
             char *artifact_dir_cstr = (char *)C_COMPILER_alloc(sb.len);
@@ -1921,8 +1976,8 @@ boolx c_compiler_render_output_object(Arg_Builder *compiler_cmd, Arg_Builder *li
             string_builder_clear(&sb);
             arg_builder_append(compiler_cmd, artifact_dir_cstr);
         }
-        else if (obj_opts.filename) {
-            Os_Path dirname = os_path_dirname(os_path_create((char *)obj_opts.filename));
+        else if (options.output_filename) {
+            Os_Path dirname = os_path_dirname(os_path_create((char *)options.output_filename));
             string_builder_append_cstr(&sb, "/Fo:");
             string_builder_append_char(&sb, '\"');
             string_builder_append_cstr(&sb, dirname.path);
@@ -1941,15 +1996,15 @@ boolx c_compiler_render_output_object(Arg_Builder *compiler_cmd, Arg_Builder *li
 }
 
 boolx c_compiler_render_output_options(Arg_Builder *compiler_cmd, Arg_Builder *linker_cmd, C_Compiler c_compiler, C_Compiler_Options options) {
-    switch (options.output.type) {
+    switch (options.output_type) {
     case C_Compiler_Output_Type_Executable: {
-        return c_compiler_render_output_executable(compiler_cmd, linker_cmd, c_compiler, options.output, options.output.options.exe_options);
+        return c_compiler_render_output_executable(compiler_cmd, linker_cmd, c_compiler, options);
     } break;
     case C_Compiler_Output_Type_Dynamic_Library: {
-        return c_compiler_render_output_dynamic_lib(compiler_cmd, linker_cmd, c_compiler, options.output, options.output.options.lib_options);
+        return c_compiler_render_output_dynamic_lib(compiler_cmd, linker_cmd, c_compiler, options);
     } break;
     case C_Compiler_Output_Type_Object: {
-        return c_compiler_render_output_object(compiler_cmd, linker_cmd, c_compiler, options.output, options.output.options.obj_options);
+        return c_compiler_render_output_object(compiler_cmd, linker_cmd, c_compiler, options);
     } break;
     // case C_Compiler_Output_Type_Static_Library: {
     //     return c_compiler_render_output_static_lib(arg_builder, c_compiler, options.output.options.lib_options);
@@ -1967,32 +2022,35 @@ boolx c_compiler_compile_translation_unit(Arg_Builder *arg_builder, C_Compiler c
         return false;
     }
 
-    Arg_Builder compiler_cmd = {0};
-    Arg_Builder linker_cmd   = {0};
+    Arg_Builder compiler_flags = {0};
+    Arg_Builder linker_flags   = {0};
 
-    if (!c_compiler_render_compiler_options(&compiler_cmd, c_compiler, options)) {
+    if (!c_compiler_render_compiler_options(&compiler_flags, c_compiler, options)) {
         return false;
     }
 
-    if (!c_compiler_render_output_options(&compiler_cmd, &linker_cmd, c_compiler, options)) {
+    if (!c_compiler_render_output_options(&compiler_flags, &linker_flags, c_compiler, options)) {
         return false;
     }
 
-    if (!c_compiler_render_linker_options(&linker_cmd, c_compiler, options)) {
+    if (!c_compiler_render_linker_options(&linker_flags, c_compiler, options)) {
         return false;
     }
 
     if (c_compiler == C_Compiler_Msvc) {
-        arg_builder_concat(arg_builder, &compiler_cmd);
+        arg_builder_concat(arg_builder, &compiler_flags);
         arg_builder_append_one(arg_builder, translation_unit_filename);
         arg_builder_append_one(arg_builder, "/link");
-        arg_builder_concat(arg_builder, &linker_cmd);
+        arg_builder_concat(arg_builder, &linker_flags);
     }
     else {
-        arg_builder_concat(arg_builder, &compiler_cmd);
-        arg_builder_concat(arg_builder, &linker_cmd);
+        arg_builder_concat(arg_builder, &compiler_flags);
+        arg_builder_concat(arg_builder, &linker_flags);
         arg_builder_append_one(arg_builder, translation_unit_filename);
     }
+
+    arg_builder_free(linker_flags);
+    arg_builder_free(compiler_flags);
 
     return true;
 }
@@ -2003,10 +2061,12 @@ boolx c_compiler_compile_translation_unit(Arg_Builder *arg_builder, C_Compiler c
 #ifndef RUN_H
 #define RUN_H
 
+#include "os_path.h"
 #include "string_builder.h"
 #include "arg_builder.h"
 #include "os_helpers.h"
 #include "c_compiler.h"
+#include "fmt_string.h"
 
 #if defined(CBUILD_alloc)
 #define RUN_alloc CBUILD_alloc
@@ -2032,7 +2092,22 @@ boolx c_compiler_compile_translation_unit(Arg_Builder *arg_builder, C_Compiler c
 AsyncProcessInfo run_async (Arg_Builder *arg_builder, String_Builder *sb);
 int              run_sync  (Arg_Builder *arg_builder, String_Builder *sb);
 int              run_wait_for_process(AsyncProcessInfo async_info);
-void rebuild_builder_if_needed(Arg_Builder *arg_builder, String_Builder *sb, int argc, char *const *argv, const char *filename, const char *const *dependency_filenames, size_t num_dependency_filenames);
+
+boolx should_rebuild(
+    const char *exe_name, 
+    const char *filename, 
+    const char *const *dependency_filenames, 
+    size_t num_dependency_filenames
+);
+
+void rebuild_and_rerun(
+    Arg_Builder *arg_builder, 
+    String_Builder *sb, 
+    C_Compiler_Options compile_options, 
+    int argc, 
+    char *const *argv, 
+    const char *filename
+);
 
 #if defined(CBUILD) || defined(RUN_IMPL)
 
@@ -2141,7 +2216,7 @@ AsyncProcessInfo run_async(Arg_Builder *arg_builder, String_Builder *sb) {
 }
 
 int run_wait_for_process(AsyncProcessInfo async_info) {
-    int status;
+    int status = 0;
     pid_t result = waitpid(async_info.pid, &status, 0);
 
     if (result == -1) {
@@ -2169,7 +2244,7 @@ int run_sync(Arg_Builder *arg_builder, String_Builder *sb) {
 }
 #endif // _WIN32
 
-boolx check_needs_rebuild(const char *exe_name, const char *filename, const char *const *dependency_filenames, size_t num_dependency_filenames) {
+boolx should_rebuild(const char *exe_name, const char *filename, const char *const *dependency_filenames, size_t num_dependency_filenames) {
     boolx needs_rebuild = false;
     
     long long int exe_modified_time  = os_get_last_modified_time(exe_name);
@@ -2205,93 +2280,60 @@ boolx check_needs_rebuild(const char *exe_name, const char *filename, const char
     return needs_rebuild;
 }
 
-void rebuild_builder_if_needed(
-    Arg_Builder *arg_builder, 
-    String_Builder *sb, 
+/**
+ * @brief 
+ * 
+ * @param compile_options output_type will be set to Executable and output_filename will be set to passed filename
+ */
+void rebuild_and_rerun(
+    Arg_Builder *arg_builder,
+    String_Builder *sb,
+    C_Compiler_Options compile_options,
     int argc, 
     char *const *argv, 
-    const char *filename, 
-    const char *const *dependency_filenames, 
-    size_t num_dependency_filenames
+    const char *filename
 ) {
-
     if (argc == 0 || argv == NULL) {
         fprintf(stderr, "error: argc argv is empty\n");
         return;
     }
-    const char * exe_name = argv[0];
-    boolx needs_rebuild = check_needs_rebuild(exe_name, filename, dependency_filenames, num_dependency_filenames);
-    #define MSCV_OBJ_DIR "tmp"
-    // if we are compiling with cl from msvc we need a place to dump 
-    // the obj files spat out from the compiler.
-    if (C_COMPILER_ENUM == C_Compiler_Msvc) {
-        if(!os_make_directory(MSCV_OBJ_DIR)) {
-        #ifdef _WIN32
-            if (GetLastError() != ERROR_ALREADY_EXISTS) {
-                fprintf(stderr, "error: create directory tmp for obj files\n");
-                return;
-            }
-        #else 
-            if (errno != EEXIST) {
-                fprintf(stderr, "error: create directory tmp\n");
-                return;
-            }
-        #endif
-        }
+
+    char *exe_name = argv[0];
+    const char *new_filename = 0;
+    (void)fmt_string(&new_filename, "%s.bak", exe_name);
+
+    fprintf(stderr, "[MOVE FILE] %s -> %s\n", exe_name, new_filename);
+    if (!os_move_file(exe_name, new_filename)) {
+        char *os_err_msg = os_get_last_error_string();
+        fprintf(stderr, "[MOVE FILE] unable to move file: %s\n", os_err_msg);
+        fmt_string_free(new_filename);
+        exit(1);
     }
 
-    if (needs_rebuild) {
-        string_builder_clear(sb);
-        string_builder_append_cstr(sb, exe_name);
-        string_builder_append_cstr(sb, ".bak");
-        string_builder_append_null(sb);
-
-        char *new_filename = (char *) RUN_alloc(sb->len);
-        string_builder_to_cstr(sb, new_filename, sb->len);
-
-        if (!os_move_file(exe_name, new_filename)) {
-            RUN_free(new_filename);
-            return;
-        }
-
-        arg_builder_append(arg_builder, C_COMPILER_EXE);
-
-        if (C_COMPILER_ENUM == C_Compiler_Msvc) {
-            String_Builder output_flag = {0};
-            string_builder_append_cstr(&output_flag, "/Fe:");
-            string_builder_append_char(&output_flag, '\"');
-            string_builder_append_cstr(&output_flag, exe_name);
-            string_builder_append_char(&output_flag, '\"');
-            arg_builder_append(arg_builder, output_flag.ptr);
-            string_builder_free(&output_flag);
-
-            arg_builder_append(arg_builder, "/Fo:\"" MSCV_OBJ_DIR "/\"");
-            arg_builder_append(arg_builder, "/Zi");
-        }
-        else {
-            arg_builder_append(arg_builder, "-Wall", "-Wextra", "-std=c99", "-pedantic", "-g");
-            arg_builder_append(arg_builder, "-o", exe_name);
-        }
-
-        string_builder_clear(sb);
-        arg_builder_append(arg_builder, filename);
-        int compile_code = run_sync(arg_builder, sb);
-        if (compile_code != 0) {
-            os_move_file(new_filename, exe_name);
-            RUN_free(new_filename);
-            return;
-        }
-        arg_builder_reset(arg_builder);
-        // TODO(woody): windows support
-        int ret_val = execvp(argv[0], argv);
-        if (ret_val == -1) {
-            fprintf(stderr, "error: reruning build system failed %s\n", os_get_last_error_string());
-            exit(1);
-            return;
-        }
+    compile_options.output_type = C_Compiler_Output_Type_Executable;
+    compile_options.output_filename = exe_name;
+    if (!c_compiler_compile_translation_unit(arg_builder, C_COMPILER_ENUM, compile_options, filename)) {
+        fmt_string_free(new_filename);
+        exit(1);
     }
-    string_builder_clear(sb);
-    arg_builder_reset(arg_builder); 
+
+    int compile_code = run_sync(arg_builder, sb);
+    if (compile_code != 0) {
+        fprintf(stderr, "[MOVE FILE] %s -> %s\n", new_filename, exe_name);
+        os_move_file(new_filename, exe_name);
+        fmt_string_free(new_filename);
+        exit(1);
+    }
+    arg_builder_clear(arg_builder);
+    // TODO(woody): windows support
+    fprintf(stderr, "[RERUN] %s\n", exe_name);
+    int ret_val = execvp(argv[0], argv);
+    if (ret_val == -1) {
+        fprintf(stderr, "error: reruning build system failed %s\n", os_get_last_error_string());
+        fmt_string_free(new_filename);
+        exit(1);
+        return;
+    }
     
     return;
 }

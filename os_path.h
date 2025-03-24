@@ -59,10 +59,10 @@ typedef struct {
 } Os_Path;
 
 // create a new Os_Path with default Unix style
-Os_Path os_path_create(char *path);
+Os_Path os_path_create(const char *path);
 
 // create a new Os_Path with specified style, this will convert incoming path to pathstyle if needed
-Os_Path os_path_create_styled(char *path, Os_Path_Style style);
+Os_Path os_path_create_styled(const char *path, Os_Path_Style style);
 
 // clones path will allocate and copy the path str too.
 Os_Path os_path_clone(const Os_Path fp);
@@ -126,11 +126,11 @@ static boolx _convert_to_windows_style(char *path) {
     return true;
 }
 
-Os_Path os_path_create(char *path) {
+Os_Path os_path_create(const char *path) {
     return os_path_create_styled(path, SYSTEM_PATH_STYLE);
 }
 
-Os_Path os_path_create_styled(char *path, Os_Path_Style style) {
+Os_Path os_path_create_styled(const char *path, Os_Path_Style style) {
     Os_Path result = {0};
     if (path == NULL) return result;
 

@@ -1,6 +1,9 @@
 #ifndef C_COMPILER_H
 #define C_COMPILER_H
+#include <assert.h>
 
+#include "tmp_alloc.h"
+#include "fmt_string.h"
 #include "os_path.h"
 #include "string_builder.h"
 #include "arg_builder.h"
@@ -48,11 +51,44 @@ typedef enum C_Compiler_Standard_E {
     C_Compiler_Standard_C23 = 5,
 
     C_Compiler_Standard_CPP11 = 6,
+
+    C_Compiler_Standard_MAX,
 } C_Compiler_Standard;
 
+const char *c_compiler_standard_flag_str(C_Compiler c_compiler, C_Compiler_Standard std) {
+    if (c_compiler == C_Compiler_Clang || c_compiler == C_Compiler_Gcc) {
+        const char *table[C_Compiler_Standard_MAX] = {
+            "", // default of compiler
+            "-std=c89",
+            "-std=c99",
+            "-std=c11",
+            "-std=c17",
+            "-std=c23",
+            "-std=c++11"
+        };
+        assert((int) std < C_Compiler_Standard_MAX);
+        return table[std];
+    }
+    else if (c_compiler == C_Compiler_Msvc) {
+        const char *table[C_Compiler_Standard_MAX] = {
+            "", // default of compiler
+            "", // unsupported in msvc "/std:c89",
+            "", // unsupported in msvc "/std:c99",
+            "/std:c11",
+            "/std:c17",
+            "/std:c23",
+            "/std:c++11"
+        };
+        assert((int) std < (int)C_Compiler_Standard_MAX);
+        return table[std];
+    }
+    
+    return NULL;
+}
+
 typedef enum C_Compiler_Warning_Level_E {
-    C_Compiler_Warning_Level_None = 0, // disable all warnings
-    C_Compiler_Warning_Level_Default,  // the default of the compiler
+    C_Compiler_Warning_Level_Default = 0,  // the default of the compiler
+    C_Compiler_Warning_Level_None = 1, // disable all warnings
     C_Compiler_Warning_Level_Strict,   // msvc /Wall - clang/gcc -Wall -Wextra -Wpedantic -Werror
 } C_Compiler_Warning_Level;
 
@@ -80,32 +116,6 @@ typedef enum C_Compiler_Output_Type_E {
     C_Compiler_Output_Type_Object
 } C_Compiler_Output_Type;
 
-typedef struct C_Compiler_Output_Executable_S {
-    const char *filename;
-} C_Compiler_Output_Executable;
-
-typedef struct C_Compiler_Output_Library_S {
-    const char *filename;
-} C_Compiler_Output_Library;
-
-typedef struct C_Compiler_Output_Object_S {
-    const char *filename;
-} C_Compiler_Output_Object;
-
-typedef struct C_Compiler_Output_S {
-    C_Compiler_Output_Type type;
-
-    boolx debug_symbols;
-
-    const char *artifact_directory;
-
-    union {
-        C_Compiler_Output_Executable exe_options;
-        C_Compiler_Output_Library    lib_options;
-        C_Compiler_Output_Object     obj_options;
-    } options;
-
-} C_Compiler_Output;
 
 typedef struct C_Compiler_Options_S {
     C_Compiler_Preprocessor_Defines         preprocessor_defines;
@@ -117,7 +127,11 @@ typedef struct C_Compiler_Options_S {
     C_Compiler_Link_Library_Search_Paths    library_search_paths;
     C_Compiler_Link_Libraries               libraries;
 
-    C_Compiler_Output                       output;
+    
+    C_Compiler_Output_Type                  output_type;
+    boolx                                   output_debug_symbols;
+    const char                             *output_artifact_directory;
+    const char                             *output_filename;
 
     struct String_Array_S                   other_compiler_flags;
     struct String_Array_S                   other_linker_flags;
@@ -126,7 +140,7 @@ typedef struct C_Compiler_Options_S {
 
 boolx c_compiler_compile_translation_unit(Arg_Builder *arg_builder, C_Compiler c_compiler, C_Compiler_Options options, const char *c_filename);
 
-#if defined(CBUILD) || defined(C_COMPILER_IMPL)
+#if defined(CBUILD) || defined(C_COMPILER_IMPL) || 1
 
 #ifdef __clang__
 const C_Compiler C_COMPILER_ENUM = C_Compiler_Clang;
@@ -186,71 +200,29 @@ boolx c_compiler_render_std(Arg_Builder *arg_builder, C_Compiler c_compiler, C_C
     if (std == C_Compiler_Standard_Default) {
         return true;
     }
-    switch (c_compiler) {
-        case C_Compiler_Clang:
-        case C_Compiler_Gcc: {
-            const char *table[] = {
-                "", // default of compiler
-                "-std=c89",
-                "-std=c99",
-                "-std=c11",
-                "-std=c17",
-                "-std=c23",
-                "-std=c++11"
-            };
-            const char *std_str = table[std];
-            arg_builder_append_one(arg_builder, std_str);
-            return true;
-        }
-        break;
-        case C_Compiler_Msvc: {
-            const char *table[] = {
-                "", // default of compiler
-                "", // unsupported in msvc "/std:c89",
-                "", // unsupported in msvc "/std:c99",
-                "/std:c11",
-                "/std:c17",
-                "/std:c23",
-                "/std:c++11"
-            };
-            const char *std_str = table[std];
-            arg_builder_append_one(arg_builder, std_str);
-            return true;
-        }
-        break;
-        default: {
-            fprintf(stderr, "c compiler render std flag: unsupported compiler: %s\n", c_compiler_str(c_compiler));
-            return false;
-        }
+    const char *std_str = c_compiler_standard_flag_str(c_compiler, std);
+    if (std_str == NULL) {
+        fprintf(stderr, "c compiler render std: unknown std %d\n", std);
+        return false;
     }
+    arg_builder_append_one(arg_builder, std_str);
+    return true;
 }
 
 boolx c_compiler_render_warning_level(Arg_Builder *arg_builder, C_Compiler c_compiler, C_Compiler_Warning_Level warning_level) {
     if (c_compiler == C_Compiler_Clang || c_compiler == C_Compiler_Gcc) {
         switch (warning_level) {
-        case C_Compiler_Warning_Level_None: 
-            arg_builder_append_one(arg_builder, "-w"); 
-        break;
-        case C_Compiler_Warning_Level_Strict: 
-            arg_builder_append(arg_builder, "-Wall", "-Wextra", "-Wpedantic", "-Werror");
-        break;
-        default:
-            // nothing to add to thearg_builder 
-        break;
+            case C_Compiler_Warning_Level_None: arg_builder_append_one(arg_builder, "-w"); break;
+            case C_Compiler_Warning_Level_Strict: arg_builder_append(arg_builder, "-Wall", "-Wextra", "-Wpedantic", "-Werror"); break;
+            default: /* nothing to add to the arg_builder  */ break; 
         }
         return true;
     }
     else if (c_compiler == C_Compiler_Msvc) {
         switch (warning_level) {
-        case C_Compiler_Warning_Level_None: 
-            arg_builder_append_one(arg_builder, "/w"); 
-        break;
-        case C_Compiler_Warning_Level_Strict: 
-            arg_builder_append(arg_builder, "/W4", "/WX"); 
-        break;
-        default: {
-            // nothing to add to thearg_builder 
-        } break;
+            case C_Compiler_Warning_Level_None: arg_builder_append_one(arg_builder, "/w"); break;
+            case C_Compiler_Warning_Level_Strict: arg_builder_append(arg_builder, "/W4", "/WX"); break;
+            default: /* nothing to add to the arg_builder  */ break;
         }
         return true;
     }
@@ -273,25 +245,20 @@ boolx c_compiler_render_preprocessor_defines(Arg_Builder *arg_builder, C_Compile
     }
 
     for (size_t i = 0; i < defines.count; ++i) {
-        String_Builder defined = {0};
 
+        const char *flag = 0;
         if (c_compiler == C_Compiler_Clang || c_compiler == C_Compiler_Gcc) {
-            string_builder_append_char(&defined, '-');
+            fmt_string(&flag, "-D%s", defines.data[i]);
         }
         else if (c_compiler == C_Compiler_Msvc) {
-            string_builder_append_char(&defined, '/');
+            fmt_string(&flag, "/D%s", defines.data[i]);
         }
         else {
             fprintf(stderr, "unreachable: c compiler render preprocessor defines: unsupported c compiler: %s\n", c_compiler_str(c_compiler));
-            string_builder_free(&defined);
             continue;
-        }
+        } 
 
-        string_builder_append_char(&defined, 'D');
-        string_builder_append_cstr(&defined, defines.data[i]);
-        string_builder_append_null(&defined);
-
-        arg_builder_append_one(arg_builder, defined.ptr);
+        arg_builder_append_one(arg_builder, flag);
     }
 
     return true;
@@ -311,27 +278,21 @@ boolx c_compiler_render_header_search_paths(Arg_Builder *arg_builder, C_Compiler
     }
 
     for (size_t i = 0; i < header_search_paths.count; ++i) {
-        String_Builder defined = {0};
 
+        const char *flag = 0;
         if (c_compiler == C_Compiler_Clang || c_compiler == C_Compiler_Gcc) {
-            string_builder_append_char(&defined, '-');
             os_path_set_style(header_search_paths.data + i, OS_PATH_STYLE_UNIX);
+            fmt_string(&flag, "-I%s", header_search_paths.data + i);
         }
         else if (c_compiler == C_Compiler_Msvc) {
-            string_builder_append_char(&defined, '/');
-            os_path_set_style(header_search_paths.data + i, OS_PATH_STYLE_WINDOWS);
+            fmt_string(&flag, "/I\"%s\"", header_search_paths.data + i);
         }
         else {
             fprintf(stderr, "unreachable: c compiler render header search paths: unsupported c compiler: %s\n", c_compiler_str(c_compiler));
-            string_builder_free(&defined);
             continue;
         }
 
-        string_builder_append_char(&defined, 'I');
-        string_builder_append_cstr(&defined, header_search_paths.data[i].path);
-        string_builder_append_null(&defined);
-
-        arg_builder_append_one(arg_builder, defined.ptr);
+        arg_builder_append_one(arg_builder, flag);
     }
 
     return true;
@@ -350,25 +311,21 @@ boolx c_compiler_render_library_search_paths(Arg_Builder *arg_builder, C_Compile
     }
 
     for (size_t i = 0; i < library_search_paths.count; ++i) {
-        String_Builder defined = {0};
-
+        const char *flag = 0;
         if (c_compiler == C_Compiler_Clang || c_compiler == C_Compiler_Gcc) {
-            string_builder_append_cstr(&defined, "-L");
-            os_path_set_style(&library_search_paths.data[i], OS_PATH_STYLE_UNIX);
+            os_path_set_style(library_search_paths.data + i, OS_PATH_STYLE_UNIX);
+            fmt_string(&flag, "-L%s", library_search_paths.data[i]);
         }
         else if (c_compiler == C_Compiler_Msvc) {
-            string_builder_append_cstr(&defined, "/LIBPATH:");
-            os_path_set_style(&library_search_paths.data[i], OS_PATH_STYLE_WINDOWS);
+            os_path_set_style(library_search_paths.data + i, OS_PATH_STYLE_WINDOWS);
+            fmt_string(&flag, "/LIBPATH:\"%s\"", library_search_paths.data[i]);
         }
         else {
             fprintf(stderr, "unreachable: c compiler render library search paths: unsupported c compiler: %s\n", c_compiler_str(c_compiler));
-            string_builder_free(&defined);
             continue;
         }
 
-        string_builder_append_cstr(&defined, library_search_paths.data[i].path);
-        string_builder_append_null(&defined);
-        arg_builder_append_one(arg_builder, defined.ptr);
+        arg_builder_append_one(arg_builder, flag);
     }
 
     return true;
@@ -445,7 +402,7 @@ boolx c_compiler_render_other_flags(Arg_Builder *arg_builder, C_Compiler c_compi
 
 boolx c_compiler_render_linker_options(Arg_Builder *arg_builder, C_Compiler c_compiler, C_Compiler_Options options) {
     if (c_compiler == C_Compiler_Msvc) {
-        if (options.output.debug_symbols) {
+        if (options.output_debug_symbols) {
             arg_builder_append_one(arg_builder, "/DEBUG");
         }
     }
@@ -479,7 +436,7 @@ boolx c_compiler_render_compiler_options(Arg_Builder *arg_builder, C_Compiler c_
         return false;
     }
 
-    if (!c_compiler_render_debug_symbols_flag(arg_builder, c_compiler, options.output.debug_symbols)) {
+    if (!c_compiler_render_debug_symbols_flag(arg_builder, c_compiler, options.output_debug_symbols)) {
         return false;
     }
 
@@ -502,10 +459,10 @@ boolx c_compiler_render_compiler_options(Arg_Builder *arg_builder, C_Compiler c_
     return true;
 }
 
-boolx c_compiler_render_output_executable(Arg_Builder *compiler_cmd, Arg_Builder *linker_cmd, C_Compiler c_compiler, C_Compiler_Output out_opts, C_Compiler_Output_Executable exe_opts) {
+boolx c_compiler_render_output_executable(Arg_Builder *compiler_cmd, Arg_Builder *linker_cmd, C_Compiler c_compiler, C_Compiler_Options options) {
     (void) compiler_cmd;
     if (c_compiler == C_Compiler_Clang || c_compiler == C_Compiler_Gcc) {
-        arg_builder_append(linker_cmd, "-o", exe_opts.filename);
+        arg_builder_append(linker_cmd, "-o", options.output_filename);
         return true;
     }
     else if (c_compiler == C_Compiler_Msvc) {
@@ -514,7 +471,7 @@ boolx c_compiler_render_output_executable(Arg_Builder *compiler_cmd, Arg_Builder
         // .obj file destination
         string_builder_append_cstr(&sb, "/Fo:");
         string_builder_append_char(&sb, '\"');
-        string_builder_append_cstr(&sb, out_opts.artifact_directory);
+        string_builder_append_cstr(&sb, options.output_artifact_directory);
         string_builder_append_char(&sb, '\"');
         string_builder_append_null(&sb);
         char *artifact_dir_cstr = (char *)C_COMPILER_alloc(sb.len);
@@ -525,7 +482,7 @@ boolx c_compiler_render_output_executable(Arg_Builder *compiler_cmd, Arg_Builder
         // .exe file destination
         string_builder_append_cstr(&sb, "/out:");
         string_builder_append_char(&sb, '\"');
-        string_builder_append_cstr(&sb, exe_opts.filename);
+        string_builder_append_cstr(&sb, options.output_filename);
         string_builder_append_char(&sb, '\"');
         string_builder_append_null(&sb);
         char *outflag_cstr = (char *) C_COMPILER_alloc(sb.len);
@@ -541,37 +498,36 @@ boolx c_compiler_render_output_executable(Arg_Builder *compiler_cmd, Arg_Builder
     }
 }
 
-boolx c_compiler_render_output_dynamic_lib(Arg_Builder *compiler_cmd, Arg_Builder *linker_cmd, C_Compiler c_compiler, C_Compiler_Output out_opts, C_Compiler_Output_Library lib_opts) {
+boolx c_compiler_render_output_dynamic_lib(Arg_Builder *compiler_cmd, Arg_Builder *linker_cmd, C_Compiler c_compiler, C_Compiler_Options options) {
     (void) compiler_cmd;
-    (void) out_opts;
     if (c_compiler == C_Compiler_Clang || c_compiler == C_Compiler_Gcc) {
-        if (lib_opts.filename != NULL) {
-            arg_builder_append(linker_cmd, "-o", lib_opts.filename);
+        if (options.output_filename != NULL) {
+            arg_builder_append(linker_cmd, "-o", options.output_filename);
         }
         return true;
     }
     return true;
 }
 
-boolx c_compiler_render_output_object(Arg_Builder *compiler_cmd, Arg_Builder *linker_cmd, C_Compiler c_compiler, C_Compiler_Output out_opts, C_Compiler_Output_Object obj_opts) {
+boolx c_compiler_render_output_object(Arg_Builder *compiler_cmd, Arg_Builder *linker_cmd, C_Compiler c_compiler, C_Compiler_Options options) {
     (void)(linker_cmd);
     String_Builder sb = {0};
     if (c_compiler == C_Compiler_Clang || c_compiler == C_Compiler_Gcc) {
         arg_builder_append(compiler_cmd, "-c");
-        if (out_opts.artifact_directory) {
-            arg_builder_append(compiler_cmd, "-o", out_opts.artifact_directory);
+        if (options.output_artifact_directory) {
+            arg_builder_append(compiler_cmd, "-o", options.output_artifact_directory);
         }
-        else if (obj_opts.filename) {
-            arg_builder_append(compiler_cmd, "-o", obj_opts.filename);
+        else if (options.output_filename) {
+            arg_builder_append(compiler_cmd, "-o", options.output_filename);
         }
     }
     else if (c_compiler == C_Compiler_Msvc) {
         arg_builder_append(compiler_cmd, "/c");
-        if (out_opts.artifact_directory) {
+        if (options.output_artifact_directory) {
             // .obj file destination
             string_builder_append_cstr(&sb, "/Fo:");
             string_builder_append_char(&sb, '\"');
-            string_builder_append_cstr(&sb, out_opts.artifact_directory);
+            string_builder_append_cstr(&sb, options.output_artifact_directory);
             string_builder_append_char(&sb, '\"');
             string_builder_append_null(&sb);
             char *artifact_dir_cstr = (char *)C_COMPILER_alloc(sb.len);
@@ -580,8 +536,8 @@ boolx c_compiler_render_output_object(Arg_Builder *compiler_cmd, Arg_Builder *li
             string_builder_clear(&sb);
             arg_builder_append(compiler_cmd, artifact_dir_cstr);
         }
-        else if (obj_opts.filename) {
-            Os_Path dirname = os_path_dirname(os_path_create((char *)obj_opts.filename));
+        else if (options.output_filename) {
+            Os_Path dirname = os_path_dirname(os_path_create((char *)options.output_filename));
             string_builder_append_cstr(&sb, "/Fo:");
             string_builder_append_char(&sb, '\"');
             string_builder_append_cstr(&sb, dirname.path);
@@ -600,15 +556,15 @@ boolx c_compiler_render_output_object(Arg_Builder *compiler_cmd, Arg_Builder *li
 }
 
 boolx c_compiler_render_output_options(Arg_Builder *compiler_cmd, Arg_Builder *linker_cmd, C_Compiler c_compiler, C_Compiler_Options options) {
-    switch (options.output.type) {
+    switch (options.output_type) {
     case C_Compiler_Output_Type_Executable: {
-        return c_compiler_render_output_executable(compiler_cmd, linker_cmd, c_compiler, options.output, options.output.options.exe_options);
+        return c_compiler_render_output_executable(compiler_cmd, linker_cmd, c_compiler, options);
     } break;
     case C_Compiler_Output_Type_Dynamic_Library: {
-        return c_compiler_render_output_dynamic_lib(compiler_cmd, linker_cmd, c_compiler, options.output, options.output.options.lib_options);
+        return c_compiler_render_output_dynamic_lib(compiler_cmd, linker_cmd, c_compiler, options);
     } break;
     case C_Compiler_Output_Type_Object: {
-        return c_compiler_render_output_object(compiler_cmd, linker_cmd, c_compiler, options.output, options.output.options.obj_options);
+        return c_compiler_render_output_object(compiler_cmd, linker_cmd, c_compiler, options);
     } break;
     // case C_Compiler_Output_Type_Static_Library: {
     //     return c_compiler_render_output_static_lib(arg_builder, c_compiler, options.output.options.lib_options);
@@ -626,32 +582,35 @@ boolx c_compiler_compile_translation_unit(Arg_Builder *arg_builder, C_Compiler c
         return false;
     }
 
-    Arg_Builder compiler_cmd = {0};
-    Arg_Builder linker_cmd   = {0};
+    Arg_Builder compiler_flags = {0};
+    Arg_Builder linker_flags   = {0};
 
-    if (!c_compiler_render_compiler_options(&compiler_cmd, c_compiler, options)) {
+    if (!c_compiler_render_compiler_options(&compiler_flags, c_compiler, options)) {
         return false;
     }
 
-    if (!c_compiler_render_output_options(&compiler_cmd, &linker_cmd, c_compiler, options)) {
+    if (!c_compiler_render_output_options(&compiler_flags, &linker_flags, c_compiler, options)) {
         return false;
     }
 
-    if (!c_compiler_render_linker_options(&linker_cmd, c_compiler, options)) {
+    if (!c_compiler_render_linker_options(&linker_flags, c_compiler, options)) {
         return false;
     }
 
     if (c_compiler == C_Compiler_Msvc) {
-        arg_builder_concat(arg_builder, &compiler_cmd);
+        arg_builder_concat(arg_builder, &compiler_flags);
         arg_builder_append_one(arg_builder, translation_unit_filename);
         arg_builder_append_one(arg_builder, "/link");
-        arg_builder_concat(arg_builder, &linker_cmd);
+        arg_builder_concat(arg_builder, &linker_flags);
     }
     else {
-        arg_builder_concat(arg_builder, &compiler_cmd);
-        arg_builder_concat(arg_builder, &linker_cmd);
+        arg_builder_concat(arg_builder, &compiler_flags);
+        arg_builder_concat(arg_builder, &linker_flags);
         arg_builder_append_one(arg_builder, translation_unit_filename);
     }
+
+    arg_builder_free(linker_flags);
+    arg_builder_free(compiler_flags);
 
     return true;
 }
