@@ -1,4 +1,3 @@
-#include <_stdio.h>
 #include <stdio.h>
 
 #define CBUILD_alloc tmp_alloc

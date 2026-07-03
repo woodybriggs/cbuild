@@ -1,7 +1,76 @@
+/**
+    @file fmt_string.h
+    @brief Provides a printf-like function that dynamically allocates memory for the resulting string.
+
+    Dependencies:
+    - macros.h:
+        - DEBUG_BLOCK
+    - stdio.h:
+        - fprintf
+        - vsnprintf
+    - stdarg.h:
+        - va_list
+        - va_start
+        - va_end
+    - stdlib.h:
+        - malloc (aliased as FMT_STRING_alloc)
+        - free (aliased as FMT_STRING_free)
+
+    Features:
+    - Provides a `fmt_string` function that works similarly to `sprintf` but dynamically allocates memory for the formatted string.
+    - Uses a thread-local allocator context, allowing the user to specify custom memory allocation and deallocation functions.
+    - Includes a `fmt_string_free` function to release the memory allocated by `fmt_string`.
+    - Supports standard printf format specifiers.
+
+
+    Documentation:
+    Do this
+        #define FMT_STRING_IMPL
+    before you include this file in *one* C or C++ file to create the implementation.
+
+    1. Include the `fmt_string.h` header file in your C/C++ code.
+    2. If you intend to use the `fmt_string` API, in *one* of your `.c` or `.cpp` files, define the `FMT_STRING_IMPL` macro *before* including `fmt_string.h`. This will compile the implementation of the functions.
+    3. Optionally, if you need to use a custom memory allocator (other than `malloc` and `free`), you can use the `use_fmt_string_allocator_ctx()` function to set your own allocation (`Alloc_Proc`) and deallocation (`Free_Proc`) functions.
+    4. Call the `fmt_string()` function. It takes a pointer to a `const char*` (where the allocated string will be stored), a format string (similar to the one used in `printf`), and any subsequent arguments according to the format string.
+    5. The `fmt_string()` function will allocate memory for the formatted string using the current allocator context and store the pointer to this memory in the `const char**` you provided. It returns the length of the formatted string (excluding the null terminator).
+    6. Use the allocated string as needed.
+    7. When you are finished with the string, you *must* free the allocated memory by calling the `fmt_string_free()` function, passing the pointer to the string that was returned by `fmt_string()`.
+
+    @nickname Woody
+    @author Edward Briggs (woody@ebrb.ltd)
+    @date 2025-02-23 T 16:43:00+08:00
+
+    @copyright Copyright (c) 2025 Edward Briggs
+
+    @license
+    This header file is distributed under the MIT License.
+
+    Copyright (c) 2025 Edward Briggs
+
+    Permission is hereby granted, free of charge, to any person obtaining a copy
+    of this software and associated documentation files (the "Software"), to deal
+    in the Software without restriction, including without limitation the rights
+    to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+    copies of the Software, and to permit persons to whom the Software is
+    furnished to do so, subject to the following conditions:
+
+    The above copyright notice and this permission notice shall be included in all
+    copies or substantial portions of the Software.
+
+    THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+    IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+    FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+    AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+    LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+    OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+    SOFTWARE.
+*/
 #ifndef FMT_STRING_H
 #define FMT_STRING_H
 
+#if !defined(CBUILD)
 #include "macros.h"
+#endif
 #include <stdio.h>
 #include <stdarg.h>
 
@@ -49,7 +118,9 @@ thread_local Fmt_String_Allocator global_fmt_string_allocator_ctx = {
 
 boolx use_fmt_string_allocator_ctx(Alloc_Proc *alloc_proc, Free_Proc *free_proc);
 int   fmt_string(const char **out, const char *fmtstr, ...);
+void fmt_string_free(const char *ptr);
 
+#if defined(CBUILD) || defined(FMT_STRING_IMPL)
 
 boolx use_fmt_string_allocator_ctx(Alloc_Proc *alloc_proc, Free_Proc *free_proc) {
 
@@ -102,3 +173,4 @@ void fmt_string_free(const char *ptr) {
 }
 
 #endif
+#endif 

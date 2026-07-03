@@ -1,12 +1,21 @@
-#include <_stdio.h>
-#define CBUILD
+#include <stdlib.h>
+
+#define TMP_ALLOC_IMPL
+#define STRING_BUILDER_IMPL
+#define ARG_BUILDER_IMPL
+#define OS_HELPERS_IMPL
+#define C_COMPILER_IMPL
+#define RUN_IMPL
+#define FMT_STRING_IMPL
+#define OS_PATH_IMPL
+
 #define CBUILD_alloc tmp_alloc
 #define CBUILD_realloc tmp_realloc
 #define CBUILD_free tmp_free
 
 #include "../../macros.h"
 
-#define TMP_ALLOC_SIZE kilobytes_to_bytes(24)
+#define TMP_ALLOC_SIZE kilobytes_to_bytes(32)
 #include "../../tmp_alloc.h"
 #include "../../string_builder.h"
 #include "../../arg_builder.h"
@@ -29,6 +38,7 @@ int main(int argc, char **argv) {
         "arg_builder.h",
         "os_helpers.h",
         "os_path.h",
+        "fmt_string.h",
         "c_compiler.h",
         "run.h",
     };
@@ -97,9 +107,9 @@ int main(int argc, char **argv) {
         fprintf(outfile.handle, "#pragma region %s\n", filename);
         fprintf(outfile.handle, "%.*s\n", (int)dest.count, dest.data);
         tmp_free(data);
-        os_file_close(file_handle);
+        os_close_file(file_handle);
     }
-    os_file_close(outfile);
+    os_close_file(outfile);
 
     return 0;
 }

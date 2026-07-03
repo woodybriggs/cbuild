@@ -70,11 +70,9 @@ return 0;
 #ifndef TEST_H
 #define TEST_H
 
-#include <_stdio.h>
 #include <stdio.h>
 #include <stdbool.h>
 #include <stdarg.h>
-#include "fmt_string.h"
 #include <string.h>
 
 typedef enum Test_Result_E {
@@ -83,10 +81,10 @@ typedef enum Test_Result_E {
 } test_result_type;
 
 typedef struct Test_Result_S {
-    test_result_type   type;
-    const char     *msg;
-    const char     *file;
-    int             line;
+    const char          *file;
+    const char          *msg;
+    int                 line;
+    test_result_type    type;
 
 } test_result_t;
 

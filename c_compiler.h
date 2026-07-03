@@ -1,12 +1,103 @@
+/**
+    @file c_compiler.h
+    @brief Provides an API for generating command-line arguments for various C/C++ compilers (Clang, GCC, MSVC).
+
+    Dependencies:
+    - assert.h:
+        - assert
+    - fmt_string.h:
+        - fmt_string
+    - os_path.h:
+        - Os_Path
+        - os_path_set_style
+        - os_path_dirname
+        - os_path_create
+    - string_builder.h:
+        - String_Builder
+        - string_builder_append_char
+        - string_builder_append_cstr
+        - string_builder_append_null
+        - string_builder_to_cstr
+        - string_builder_clear
+        - string_builder_free
+    - arg_builder.h:
+        - Arg_Builder
+        - arg_builder_append_one
+        - arg_builder_append
+        - arg_builder_concat
+        - arg_builder_free
+    - stdlib.h:
+        - malloc (aliased as C_COMPILER_alloc)
+        - realloc (aliased as C_COMPILER_realloc)
+        - free (aliased as C_COMPILER_free)
+
+    Features:
+    - Defines enumerations for supported C/C++ compilers (Clang, GCC, MSVC).
+    - Provides functions to get string representations of compiler types and executable names.
+    - Supports specifying the C/C++ standard to use during compilation.
+    - Allows setting the compiler warning level.
+    - Enables configuration of preprocessor definitions, header search paths, library search paths, and link libraries.
+    - Supports linking against frameworks (for Clang).
+    - Offers options to control the output type (executable, dynamic library, static library, object file) and output filename.
+    - Includes support for outputting debug symbols.
+    - Allows passing additional compiler and linker flags.
+    - Provides a function to generate the full command line for compiling a translation unit based on the provided options.
+
+
+    Documentation:
+    Do this
+        #define C_COMPILER_IMPL
+    before you include this file in *one* C or C++ file to create the implementation.
+
+    1. Include the `c_compiler.h` header file in your C/C++ code.
+    2. If you intend to use the `C_Compiler` API, in *one* of your `.c` or `.cpp` files, define the `C_COMPILER_IMPL` macro *before* including `c_compiler.h`. This will compile the implementation of the functions.
+    3. Create a `C_Compiler_Options` struct and initialize its members with the desired compilation settings. This includes specifying the C/C++ standard, warning level, preprocessor definitions, include paths, library paths, link libraries, output type, output filename, and other flags.
+    4. Choose the target compiler by using one of the `C_Compiler` enumeration values (e.g., `C_Compiler_Clang`, `C_Compiler_Gcc`, `C_Compiler_Msvc`).
+    5. Create an `Arg_Builder` struct to store the generated compiler command-line arguments.
+    6. Call the `c_compiler_compile_translation_unit()` function, passing the `Arg_Builder`, the chosen `C_Compiler` enum value, the configured `C_Compiler_Options`, and the path to the source file you want to compile.
+    7. After the function call, the `Arg_Builder` will contain the necessary command-line arguments to compile the specified translation unit with the given options. You can then use the `Arg_Builder` to execute the compiler command.
+    8. Remember to free the memory associated with the `Arg_Builder` when you are finished with it using `arg_builder_free()`.
+
+    @nickname Woody
+    @author Edward Briggs (woody@ebrb.ltd)
+    @date 2025-02-23 T 16:43:00+08:00
+
+    @copyright Copyright (c) 2025 Edward Briggs
+
+    @license
+    This header file is distributed under the MIT License.
+
+    Copyright (c) 2025 Edward Briggs
+
+    Permission is hereby granted, free of charge, to any person obtaining a copy
+    of this software and associated documentation files (the "Software"), to deal
+    in the Software without restriction, including without limitation the rights
+    to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+    copies of the Software, and to permit persons to whom the Software is
+    furnished to do so, subject to the following conditions:
+
+    The above copyright notice and this permission notice shall be included in all
+    copies or substantial portions of the Software.
+
+    THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+    IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+    FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+    AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+    LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+    OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+    SOFTWARE.
+*/
+
 #ifndef C_COMPILER_H
 #define C_COMPILER_H
 #include <assert.h>
 
-#include "tmp_alloc.h"
+#if !defined(CBUILD)
 #include "fmt_string.h"
 #include "os_path.h"
 #include "string_builder.h"
 #include "arg_builder.h"
+#endif
 
 #if defined(CBUILD_alloc)
 #define C_COMPILER_alloc CBUILD_alloc

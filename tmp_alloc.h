@@ -68,6 +68,9 @@
 
 #include <stddef.h>
 #include <stdint.h>
+#if !defined(CBUILD)
+#include "macros.h"
+#endif
 
 #if defined(CBUILD_memcpy)
 #define TMP_ALLOC_memcpy CBUILD_memcpy
@@ -192,6 +195,9 @@ void* tmp_alloc(size_t size) {
     size_t remaining_space = (TMP_ALLOC_SIZE - current_cursor) - sizeof(Tmp_Allocator_Slot);
     if (remaining_space < size) {
         tmp_allocator.error = Tmp_Allocator_Error_Out_Of_Memory;
+        DEBUG_BLOCK(
+            fprintf(stderr, "error: tmp_alloc out of memory\n");
+        );
         return NULL;
     }
 
@@ -201,6 +207,9 @@ void* tmp_alloc(size_t size) {
     // Ensure enough space for the slot and the data
     if (data_ptr_offset + size > TMP_ALLOC_SIZE) {
         tmp_allocator.error = Tmp_Allocator_Error_Out_Of_Memory;
+        DEBUG_BLOCK(
+            fprintf(stderr, "error: tmp_alloc out of memory\n");
+        );
         return NULL;
     }
 
@@ -225,12 +234,18 @@ void* tmp_realloc(void* ptr, size_t new_size) {
     //  check that the given pointer in within bounds of allocator.
     if ((uintptr_t)ptr < (uintptr_t)tmp_allocator.buf) {
         tmp_allocator.error = Tmp_Allocator_Error_Out_Of_Bounds;
+        DEBUG_BLOCK(
+            fprintf(stderr, "error: tmp_realloc ptr is out of bounds\n");
+        );
         return NULL;
     }
 
     //  check that the given pointer in within bounds of allocator.
     if ((uintptr_t)ptr > ((uintptr_t)tmp_allocator.buf + TMP_ALLOC_SIZE - 1)){
         tmp_allocator.error = Tmp_Allocator_Error_Out_Of_Bounds;
+        DEBUG_BLOCK(
+            fprintf(stderr, "error: tmp_realloc ptr is out of bounds\n");
+        );
         return NULL;
     }
 
@@ -245,6 +260,9 @@ void* tmp_realloc(void* ptr, size_t new_size) {
     // check that the new size is bigger than existing size.
     if (new_size <= slot->size) {
         tmp_allocator.error = Tmp_Allocator_Error_Realloc_Smaller;
+        DEBUG_BLOCK(
+            fprintf(stderr, "error: tmp_realloc requested size is smaller than allocated size\n");
+        );
         return NULL;
     }
 
@@ -260,6 +278,9 @@ void* tmp_realloc(void* ptr, size_t new_size) {
     void* new_ptr = tmp_alloc(new_size);
     if (new_ptr == NULL) {
         tmp_allocator.error = Tmp_Allocator_Error_Out_Of_Memory;
+        DEBUG_BLOCK(
+            fprintf(stderr, "error: tmp_realloc out of memory\n");
+        );
         return NULL;
     }
     TMP_ALLOC_memcpy(new_ptr, ptr, slot->size);

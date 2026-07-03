@@ -1,5 +1,47 @@
+/**
+    @file os_path.h
+    @brief Provides a platform-independent way to represent and manipulate file paths.
+
+    Dependencies:
+    - string.h:
+        - strlen
+        - memcpy
+        - strrchr
+        - strncmp
+        - strcat
+    - stdio.h:
+        - fprintf (when NDEBUG is not defined)
+    - stdlib.h:
+        - malloc (aliased as OS_PATH_alloc)
+        - realloc (aliased as OS_PATH_realloc)
+        - free (aliased as OS_PATH_free)
+
+    Features:
+    - Defines an `Os_Path` structure to hold a file path and its style (Unix or Windows).
+    - Provides functions to create, clone, and free `Os_Path` objects.
+    - Allows setting and converting the path style of an `Os_Path` object.
+    - Includes functions to join path components, get the directory name, and get the base filename from an `Os_Path`.
+    - Offers a function to get the string representation of an `Os_Path`.
+    - Provides a placeholder for path escaping (currently not implemented).
+
+
+    Documentation:
+    Do this
+        #define OS_PATH_IMPL
+    before you include this file in *one* C or C++ file to create the implementation.
+
+    1. Include the `os_path.h` header file in your C/C++ code.
+    2. If you intend to use the `OS_PATH` API, in *one* of your `.c` or `.cpp` files, define the `OS_PATH_IMPL` macro *before* including `os_path.h`. This will compile the implementation of the functions.
+    3. Use `os_path_create(const char *path)` to create a new `Os_Path` object. This function uses the system's default path style (Windows on Windows, Unix on other systems
+*/
+
 #ifndef OS_PATH_H
 #define OS_PATH_H
+
+#include <stddef.h>
+#if !defined(CBUILD)
+#include "macros.h"
+#endif
 
 #include <string.h>
 #include <stdio.h>
@@ -58,6 +100,16 @@ typedef struct {
     Os_Path_Style style;
 } Os_Path;
 
+typedef struct {
+    const char *fragment;
+    size_t len;
+} Path_Fragment;
+
+typedef struct {
+    Path_Fragment *fragments;
+    size_t count;
+} Path_Fragments;
+
 // create a new Os_Path with default Unix style
 Os_Path os_path_create(const char *path);
 
@@ -86,6 +138,7 @@ Os_Path os_path_basename(const Os_Path fp);
 // frees the memory allocated for a Os_Path if it was allocated with PATH_alloc
 void os_path_free(Os_Path fp);
 
+size_t os_path_fragments(Os_Path fp, Path_Fragment *out);
 
 #if defined(CBUILD) || defined(OS_PATH_IMPL)
 
@@ -162,7 +215,9 @@ boolx os_path_set_style(Os_Path *fp, Os_Path_Style style) {
             }
         } break;
         default: {
-            fprintf(stderr, "error: os_path_set_style: unsupported style given\n");
+            DEBUG_BLOCK(
+                fprintf(stderr, "error: os_path_set_style: unsupported style given\n");
+            );
             return false;
         }
     }
@@ -273,6 +328,44 @@ Os_Path os_path_escape(Os_Path *fp) {
     char *new_path = (char *)OS_PATH_alloc(0);
     (void)new_path;
     return (Os_Path){0};
+}
+
+size_t os_path_fragments(Os_Path fp, Path_Fragment *out) {
+    size_t positions[1024];
+    size_t count = 0;
+
+    char dir_sep = fp.style == OS_PATH_STYLE_WINDOWS ? '\\' : '/';
+    size_t path_len = strlen(fp.path);
+    for (size_t i = 0; i < strlen(fp.path); ++i) {
+        if (fp.path[i] == dir_sep) {
+            positions[count++] = i;
+        }
+    }
+
+    if (out == NULL) {
+        return count;
+    }
+
+    size_t start = 0;
+    for (size_t i = 0; i < count; ++i) {
+        size_t end = positions[i];
+        size_t len = end - start;
+        
+        // Populate the fragment info
+        out[i].fragment = &fp.path[start];
+        out[i].len = len;
+        
+        start = end + 1;
+    }
+
+    // Handle the final trailing fragment after the last separator
+    if (start < path_len) {
+        out[count].fragment = &fp.path[start];
+        out[count].len = path_len - start;
+        count++;
+    }
+
+    return count;
 }
 
 #endif // OS_PATH_IMPL

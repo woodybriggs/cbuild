@@ -26,6 +26,68 @@
 #endif // CBUILD_memset
 
 #pragma region macros.h
+/**
+    @file macros.h
+    @brief Defines various utility macros for cross-platform compatibility, debugging, and convenience.
+
+    Dependencies:
+    - stdio.h:
+        - fprintf (only when NDEBUG is not defined)
+
+    Features:
+    - Defines platform-specific newline characters (`NL`, `ESC_NL`).
+    - Provides definitions for `false` and `true` if they are not already defined.
+    - Introduces a `debug_log` macro for conditional logging based on the `NDEBUG` preprocessor definition.
+    - Offers a `DEBUG_BLOCK` macro to conditionally execute code blocks during debug builds.
+    - Includes an `array_len` macro to determine the number of elements in a statically allocated array.
+    - Defines macros for converting between different data size units (bits, bytes, kilobytes, megabytes, gigabytes, terabytes).
+    - Provides a platform-independent `thread_local` macro for declaring thread-local storage variables.
+
+
+    Documentation:
+    Do this
+        // This header file typically does not require a separate implementation file. Simply include it where needed.
+
+    1. Include the `macros.h` header file in your C/C++ code.
+    2. Use the `NL` macro for inserting a platform-appropriate newline character in strings.
+    3. Use the `ESC_NL` macro for inserting an escaped newline sequence (e.g., `\n` or `\r\n`) in strings that might be interpreted by other tools or systems.
+    4. Utilize the `false` and `true` macros for boolean values.
+    5. Employ the `debug_log` macro for printing debugging information. These logs will only be active if the code is compiled without the `NDEBUG` preprocessor definition.
+    6. Enclose code that should only be executed during debugging within `DEBUG_BLOCK( [statements] )`. This code will be compiled out in release builds (when `NDEBUG` is defined).
+    7. Use the `array_len(arr)` macro to get the number of elements in a statically declared array `arr`.
+    8. Use the unit conversion macros (e.g., `kilobytes_to_bytes(5)`, `megabytes_to_bytes(1)`) to easily convert between different units of data size.
+    9. Use the `thread_local` keyword (macro) to declare variables that have thread-local storage duration, meaning each thread will have its own copy of the variable.
+
+    @nickname Woody
+    @author Edward Briggs (woody@ebrb.ltd)
+    @date 2025-02-23 T 16:43:00+08:00
+
+    @copyright Copyright (c) 2025 Edward Briggs
+
+    @license
+    This header file is distributed under the MIT License.
+
+    Copyright (c) 2025 Edward Briggs
+
+    Permission is hereby granted, free of charge, to any person obtaining a copy
+    of this software and associated documentation files (the "Software"), to deal
+    in the Software without restriction, including without limitation the rights
+    to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+    copies of the Software, and to permit persons to whom the Software is
+    furnished to do so, subject to the following conditions:
+
+    The above copyright notice and this permission notice shall be included in all
+    copies or substantial portions of the Software.
+
+    THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+    IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+    FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+    AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+    LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+    OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+    SOFTWARE.
+*/
+
 #ifndef MACROS_H
 #define MACROS_H
 
@@ -157,6 +219,9 @@
 
 #include <stddef.h>
 #include <stdint.h>
+#if !defined(CBUILD)
+#include "macros.h"
+#endif
 
 #if defined(CBUILD_memcpy)
 #define TMP_ALLOC_memcpy CBUILD_memcpy
@@ -281,6 +346,9 @@ void* tmp_alloc(size_t size) {
     size_t remaining_space = (TMP_ALLOC_SIZE - current_cursor) - sizeof(Tmp_Allocator_Slot);
     if (remaining_space < size) {
         tmp_allocator.error = Tmp_Allocator_Error_Out_Of_Memory;
+        DEBUG_BLOCK(
+            fprintf(stderr, "error: tmp_alloc out of memory\n");
+        );
         return NULL;
     }
 
@@ -290,6 +358,9 @@ void* tmp_alloc(size_t size) {
     // Ensure enough space for the slot and the data
     if (data_ptr_offset + size > TMP_ALLOC_SIZE) {
         tmp_allocator.error = Tmp_Allocator_Error_Out_Of_Memory;
+        DEBUG_BLOCK(
+            fprintf(stderr, "error: tmp_alloc out of memory\n");
+        );
         return NULL;
     }
 
@@ -314,12 +385,18 @@ void* tmp_realloc(void* ptr, size_t new_size) {
     //  check that the given pointer in within bounds of allocator.
     if ((uintptr_t)ptr < (uintptr_t)tmp_allocator.buf) {
         tmp_allocator.error = Tmp_Allocator_Error_Out_Of_Bounds;
+        DEBUG_BLOCK(
+            fprintf(stderr, "error: tmp_realloc ptr is out of bounds\n");
+        );
         return NULL;
     }
 
     //  check that the given pointer in within bounds of allocator.
     if ((uintptr_t)ptr > ((uintptr_t)tmp_allocator.buf + TMP_ALLOC_SIZE - 1)){
         tmp_allocator.error = Tmp_Allocator_Error_Out_Of_Bounds;
+        DEBUG_BLOCK(
+            fprintf(stderr, "error: tmp_realloc ptr is out of bounds\n");
+        );
         return NULL;
     }
 
@@ -334,6 +411,9 @@ void* tmp_realloc(void* ptr, size_t new_size) {
     // check that the new size is bigger than existing size.
     if (new_size <= slot->size) {
         tmp_allocator.error = Tmp_Allocator_Error_Realloc_Smaller;
+        DEBUG_BLOCK(
+            fprintf(stderr, "error: tmp_realloc requested size is smaller than allocated size\n");
+        );
         return NULL;
     }
 
@@ -349,6 +429,9 @@ void* tmp_realloc(void* ptr, size_t new_size) {
     void* new_ptr = tmp_alloc(new_size);
     if (new_ptr == NULL) {
         tmp_allocator.error = Tmp_Allocator_Error_Out_Of_Memory;
+        DEBUG_BLOCK(
+            fprintf(stderr, "error: tmp_realloc out of memory\n");
+        );
         return NULL;
     }
     TMP_ALLOC_memcpy(new_ptr, ptr, slot->size);
@@ -579,6 +662,92 @@ void string_builder_to_cstr(String_Builder *sb, char *cstr, size_t len) {
 #endif // STRING_BUILDER_H
 
 #pragma region arg_builder.h
+/**
+    @file arg_builder.h
+    @brief Provides an API for building a list of string arguments, 
+           suitable for passing to an executable.
+
+    Dependencies:
+    - stdarg.h:
+        - va_list
+        - va_start
+        - va_arg
+        - va_end
+    - stdio.h:
+        - fprintf
+    - string.h:
+        - strchr
+        - memset
+    - stdlib.h:
+        - malloc (aliased as ARG_BUILDER_alloc)
+        - realloc (aliased as ARG_BUILDER_realloc)
+        - free (aliased as ARG_BUILDER_free)
+
+    Features:
+    - Dynamically builds a list of string arguments.
+    - Supports appending single arguments.
+    - Supports appending multiple arguments using a variable argument list.
+    - Allows concatenation of two argument lists.
+    - Provides functionality to render the argument list into a single string, 
+      escaping spaces for shell compatibility.
+    - Includes functions to clear and free the allocated memory.
+    - Optionally defines a `String_Builder` structure and related functions 
+      if not already defined.
+
+
+    Documentation:
+    Do this
+        #define ARG_BUILDER_IMPL
+    before you include this file in *one* C or C++ file to create the implementation.
+
+    1. Include the `arg_builder.h` header file in your C/C++ code.
+    2. If you intend to use the `Arg_Builder` API, in *one* of your `.c` or `.cpp` files, 
+       define the `ARG_BUILDER_IMPL` macro *before* including `arg_builder.h`. 
+       This will compile the implementation of the functions.
+    3. Declare a variable of type `Arg_Builder`.
+    4. Use `arg_builder_append()` to add arguments to the builder. 
+       This function takes a variable number of `const char*` arguments, terminated by `NULL`.
+    5. Alternatively, use `arg_builder_append_one()` to append a single argument.
+    6. You can concatenate the contents of another `Arg_Builder` 
+       to an existing one using `arg_builder_concat()`.
+    7. To get a single string representation of the arguments 
+       (suitable for passing to a system call), you can use `arg_builder_render()`. 
+       This function takes an `Arg_Builder` and a `String_Builder` as input. 
+       Ensure the `String_Builder` is initialized before calling this function.
+    8. To reuse an `Arg_Builder`, you can clear its contents using `arg_builder_clear()`.
+    9. When you are finished with the `Arg_Builder`, 
+       free the allocated memory by calling `arg_builder_free()`.
+
+    @nickname Woody
+    @author Edward Briggs (woody@ebrb.ltd)
+    @date 2025-02-23 T 16:43:00+08:00
+
+    @copyright Copyright (c) 2025 Edward Briggs
+
+    @license
+    This header file is distributed under the MIT License.
+
+    Copyright (c) 2025 Edward Briggs
+
+    Permission is hereby granted, free of charge, to any person obtaining a copy
+    of this software and associated documentation files (the "Software"), to deal
+    in the Software without restriction, including without limitation the rights
+    to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+    copies of the Software, and to permit persons to whom the Software is
+    furnished to do so, subject to the following conditions:
+
+    The above copyright notice and this permission notice shall be included in all
+    copies or substantial portions of the Software.
+
+    THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+    IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+    FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+    AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+    LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+    OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+    SOFTWARE.
+*/
+
 #ifndef ARG_BUILDER_H
 #define ARG_BUILDER_H
 
@@ -745,10 +914,93 @@ void arg_builder_free(Arg_Builder arg_builder) {
 #endif  // ARG_BUILDER_H
 
 #pragma region os_helpers.h
+/**
+    @file os_helpers.h
+    @brief Provides cross-platform helper functions for common operating system operations.
+
+    Dependencies:
+    - _stdio.h:
+        - (Details of functions used are unknown as the file content is not provided)
+    - stdio.h:
+        - fprintf
+        - fopen
+        - fclose
+        - fread
+        - fwrite
+        - fseek
+        - ftell
+        - fflush
+    - string.h:
+        - strerror
+    - Windows (when _WIN32 is defined):
+        - windows.h: GetLastError, FormatMessageA, LocalFree, CreateDirectoryA, MoveFileExA, CreateFileA, CloseHandle, WriteFile, FlushFileBuffers, GetFileSizeEx, HANDLE, INVALID_HANDLE_VALUE, GENERIC_READ, FILE_SHARE_READ, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, LARGE_INTEGER, BOOL, DWORD
+    - Unix-like systems (when _WIN32 is not defined):
+        - errno.h: errno
+        - unistd.h: rename
+        - sys/stat.h: mkdir, stat
+
+    Features:
+    - Provides a function to retrieve the last operating system error message as a string.
+    - Includes functions for moving (renaming) files and creating directories.
+    - Offers a function to get the last modification timestamp of a file.
+    - Provides an abstraction for file handles and functions to open files for reading and writing, and to close them.
+    - Includes functions to read the entire content of a file into a buffer and write the entire content of a buffer to a file.
+    - Offers a function to get the size of a file.
+    - Provides a function to check if a file handle is valid.
+
+
+    Documentation:
+    Do this
+        #define OS_HELPERS_IMPL
+    before you include this file in *one* C or C++ file to create the implementation.
+
+    1. Include the `os_helpers.h` header file in your C/C++ code.
+    2. If you intend to use the `OS_HELPERS` API, in *one* of your `.c` or `.cpp` files, define the `OS_HELPERS_IMPL` macro *before* including `os_helpers.h`. This will compile the implementation of the functions.
+    3. Use `os_get_last_error_string()` to get a human-readable string describing the last operating system error. The returned string might need to be freed depending on the platform (check the implementation details).
+    4. Use `os_move_file(old_filename, new_filename)` to rename or move a file from `old_filename` to `new_filename`. Returns `true` on success, `false` on failure.
+    5. Use `os_make_directory(dirname)` to create a new directory with the specified `dirname`. Returns `true` on success, `false` on failure.
+    6. Use `os_get_last_modified_time(filename)` to get the last modification time of the file specified by `filename`. Returns the time as a `long long int` (typically seconds since the epoch) or -1 on failure.
+    7. Use `os_open_file_for_read(filename)` to open a file for reading. Returns a `File_Handle`. Check if the handle is valid using `os_file_handle_is_valid()`.
+    8. Use `os_open_file_for_write(filename)` to open a file for writing. Returns a `File_Handle`. Check if the handle is valid.
+    9. Use `os_close_file(file_handle)` to close the file associated with the given `File_Handle`. Returns `true` on success, `false` on failure.
+    10. Use `os_write_entire_file(file_handle, filename, content)` to write the data in the `Char_Buffer content` to the file associated with `file_handle`. The `filename` is used for error reporting. Returns `true` on success, `false` on failure.
+    11. Use `os_read_entire_file(file_handle, filename, dest)` to read up to `dest.count` bytes from the file associated with `file_handle` into the `Char_Buffer dest`. The `filename` is used for error reporting. Returns `true` on success, `false` on failure.
+    12. Use `os_get_file_size(file_handle, filename)` to get the size of the file associated with `file_handle`. The `filename` is used for error reporting. Returns the size as a `size_t` or 0 on failure.
+    13. Use `os_file_handle_is_valid(file_handle)` to check if the provided `File_Handle` is valid (i.e., the file is open). Returns `true` if valid, `false` otherwise.
+
+    @nickname Woody
+    @author Edward Briggs (woody@ebrb.ltd)
+    @date 2025-02-23 T 16:43:00+08:00
+
+    @copyright Copyright (c) 2025 Edward Briggs
+
+    @license
+    This header file is distributed under the MIT License.
+
+    Copyright (c) 2025 Edward Briggs
+
+    Permission is hereby granted, free of charge, to any person obtaining a copy
+    of this software and associated documentation files (the "Software"), to deal
+    in the Software without restriction, including without limitation the rights
+    to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+    copies of the Software, and to permit persons to whom the Software is
+    furnished to do so, subject to the following conditions:
+
+    The above copyright notice and this permission notice shall be included in all
+    copies or substantial portions of the Software.
+
+    THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+    IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+    FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+    AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+    LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+    OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+    SOFTWARE.
+*/
+
 #ifndef OS_HELPERS_H
 #define OS_HELPERS_H
 
-#include <_stdio.h>
 #include <stdio.h>
 #include <string.h>
 
@@ -919,7 +1171,7 @@ File_Handle os_open_file_for_write(const char *filename) {
 #endif
 }
 
-boolx os_file_close(File_Handle file_handle) {
+boolx os_close_file(File_Handle file_handle) {
 #if _WIN32
     return CloseHandle(file_handle.handle) == true;
 #else
@@ -1157,8 +1409,50 @@ boolx os_read_entire_file(File_Handle file_handle, const char *filename, Char_Bu
 #endif // OS_HELPERS_H
 
 #pragma region os_path.h
+/**
+    @file os_path.h
+    @brief Provides a platform-independent way to represent and manipulate file paths.
+
+    Dependencies:
+    - string.h:
+        - strlen
+        - memcpy
+        - strrchr
+        - strncmp
+        - strcat
+    - stdio.h:
+        - fprintf (when NDEBUG is not defined)
+    - stdlib.h:
+        - malloc (aliased as OS_PATH_alloc)
+        - realloc (aliased as OS_PATH_realloc)
+        - free (aliased as OS_PATH_free)
+
+    Features:
+    - Defines an `Os_Path` structure to hold a file path and its style (Unix or Windows).
+    - Provides functions to create, clone, and free `Os_Path` objects.
+    - Allows setting and converting the path style of an `Os_Path` object.
+    - Includes functions to join path components, get the directory name, and get the base filename from an `Os_Path`.
+    - Offers a function to get the string representation of an `Os_Path`.
+    - Provides a placeholder for path escaping (currently not implemented).
+
+
+    Documentation:
+    Do this
+        #define OS_PATH_IMPL
+    before you include this file in *one* C or C++ file to create the implementation.
+
+    1. Include the `os_path.h` header file in your C/C++ code.
+    2. If you intend to use the `OS_PATH` API, in *one* of your `.c` or `.cpp` files, define the `OS_PATH_IMPL` macro *before* including `os_path.h`. This will compile the implementation of the functions.
+    3. Use `os_path_create(const char *path)` to create a new `Os_Path` object. This function uses the system's default path style (Windows on Windows, Unix on other systems
+*/
+
 #ifndef OS_PATH_H
 #define OS_PATH_H
+
+#include <stddef.h>
+#if !defined(CBUILD)
+#include "macros.h"
+#endif
 
 #include <string.h>
 #include <stdio.h>
@@ -1217,6 +1511,16 @@ typedef struct {
     Os_Path_Style style;
 } Os_Path;
 
+typedef struct {
+    const char *fragment;
+    size_t len;
+} Path_Fragment;
+
+typedef struct {
+    Path_Fragment *fragments;
+    size_t count;
+} Path_Fragments;
+
 // create a new Os_Path with default Unix style
 Os_Path os_path_create(const char *path);
 
@@ -1245,6 +1549,7 @@ Os_Path os_path_basename(const Os_Path fp);
 // frees the memory allocated for a Os_Path if it was allocated with PATH_alloc
 void os_path_free(Os_Path fp);
 
+size_t os_path_fragments(Os_Path fp, Path_Fragment *out);
 
 #if defined(CBUILD) || defined(OS_PATH_IMPL)
 
@@ -1321,7 +1626,9 @@ boolx os_path_set_style(Os_Path *fp, Os_Path_Style style) {
             }
         } break;
         default: {
-            fprintf(stderr, "error: os_path_set_style: unsupported style given\n");
+            DEBUG_BLOCK(
+                fprintf(stderr, "error: os_path_set_style: unsupported style given\n");
+            );
             return false;
         }
     }
@@ -1434,19 +1741,326 @@ Os_Path os_path_escape(Os_Path *fp) {
     return (Os_Path){0};
 }
 
+size_t os_path_fragments(Os_Path fp, Path_Fragment *out) {
+    size_t positions[1024];
+    size_t count = 0;
+
+    char dir_sep = fp.style == OS_PATH_STYLE_WINDOWS ? '\\' : '/';
+    size_t path_len = strlen(fp.path);
+    for (size_t i = 0; i < strlen(fp.path); ++i) {
+        if (fp.path[i] == dir_sep) {
+            positions[count++] = i;
+        }
+    }
+
+    if (out == NULL) {
+        return count;
+    }
+
+    size_t start = 0;
+    for (size_t i = 0; i < count; ++i) {
+        size_t end = positions[i];
+        size_t len = end - start;
+        
+        // Populate the fragment info
+        out[i].fragment = &fp.path[start];
+        out[i].len = len;
+        
+        start = end + 1;
+    }
+
+    // Handle the final trailing fragment after the last separator
+    if (start < path_len) {
+        out[count].fragment = &fp.path[start];
+        out[count].len = path_len - start;
+        count++;
+    }
+
+    return count;
+}
+
 #endif // OS_PATH_IMPL
 #endif // OS_PATH_H
 
+#pragma region fmt_string.h
+/**
+    @file fmt_string.h
+    @brief Provides a printf-like function that dynamically allocates memory for the resulting string.
+
+    Dependencies:
+    - macros.h:
+        - DEBUG_BLOCK
+    - stdio.h:
+        - fprintf
+        - vsnprintf
+    - stdarg.h:
+        - va_list
+        - va_start
+        - va_end
+    - stdlib.h:
+        - malloc (aliased as FMT_STRING_alloc)
+        - free (aliased as FMT_STRING_free)
+
+    Features:
+    - Provides a `fmt_string` function that works similarly to `sprintf` but dynamically allocates memory for the formatted string.
+    - Uses a thread-local allocator context, allowing the user to specify custom memory allocation and deallocation functions.
+    - Includes a `fmt_string_free` function to release the memory allocated by `fmt_string`.
+    - Supports standard printf format specifiers.
+
+
+    Documentation:
+    Do this
+        #define FMT_STRING_IMPL
+    before you include this file in *one* C or C++ file to create the implementation.
+
+    1. Include the `fmt_string.h` header file in your C/C++ code.
+    2. If you intend to use the `fmt_string` API, in *one* of your `.c` or `.cpp` files, define the `FMT_STRING_IMPL` macro *before* including `fmt_string.h`. This will compile the implementation of the functions.
+    3. Optionally, if you need to use a custom memory allocator (other than `malloc` and `free`), you can use the `use_fmt_string_allocator_ctx()` function to set your own allocation (`Alloc_Proc`) and deallocation (`Free_Proc`) functions.
+    4. Call the `fmt_string()` function. It takes a pointer to a `const char*` (where the allocated string will be stored), a format string (similar to the one used in `printf`), and any subsequent arguments according to the format string.
+    5. The `fmt_string()` function will allocate memory for the formatted string using the current allocator context and store the pointer to this memory in the `const char**` you provided. It returns the length of the formatted string (excluding the null terminator).
+    6. Use the allocated string as needed.
+    7. When you are finished with the string, you *must* free the allocated memory by calling the `fmt_string_free()` function, passing the pointer to the string that was returned by `fmt_string()`.
+
+    @nickname Woody
+    @author Edward Briggs (woody@ebrb.ltd)
+    @date 2025-02-23 T 16:43:00+08:00
+
+    @copyright Copyright (c) 2025 Edward Briggs
+
+    @license
+    This header file is distributed under the MIT License.
+
+    Copyright (c) 2025 Edward Briggs
+
+    Permission is hereby granted, free of charge, to any person obtaining a copy
+    of this software and associated documentation files (the "Software"), to deal
+    in the Software without restriction, including without limitation the rights
+    to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+    copies of the Software, and to permit persons to whom the Software is
+    furnished to do so, subject to the following conditions:
+
+    The above copyright notice and this permission notice shall be included in all
+    copies or substantial portions of the Software.
+
+    THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+    IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+    FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+    AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+    LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+    OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+    SOFTWARE.
+*/
+#ifndef FMT_STRING_H
+#define FMT_STRING_H
+
+#if !defined(CBUILD)
+#include "macros.h"
+#endif
+#include <stdio.h>
+#include <stdarg.h>
+
+#if defined(CBUILD_alloc)
+#define FMT_STRING_alloc CBUILD_alloc
+#elif !defined(FMT_STRING_alloc)
+#include <stdlib.h>
+#define FMT_STRING_alloc malloc
+#endif
+
+#if defined(CBUILD_free)
+#define FMT_STRING_free CBUILD_free
+#elif !defined(FMT_STRING_free)
+#include <stdlib.h>
+#define FMT_STRING_free free 
+#endif
+
+#ifndef BOOLX
+#define BOOLX
+typedef int boolx;
+
+#ifndef false
+#define false 0
+#endif // false
+
+#ifndef true
+#define true (!false)
+#endif // true
+#endif // BOOLX
+
+
+typedef void* (Alloc_Proc)(size_t size);
+typedef void  (Free_Proc) (void *ptr);
+
+
+typedef struct  Fmt_String_Allocator_S {
+    Alloc_Proc *alloc;
+    Free_Proc  *free;
+} Fmt_String_Allocator;
+
+thread_local Fmt_String_Allocator global_fmt_string_allocator_ctx = {
+    .alloc = &FMT_STRING_alloc,
+    .free  = &FMT_STRING_free
+};
+
+boolx use_fmt_string_allocator_ctx(Alloc_Proc *alloc_proc, Free_Proc *free_proc);
+int   fmt_string(const char **out, const char *fmtstr, ...);
+void fmt_string_free(const char *ptr);
+
+#if defined(CBUILD) || defined(FMT_STRING_IMPL)
+
+boolx use_fmt_string_allocator_ctx(Alloc_Proc *alloc_proc, Free_Proc *free_proc) {
+
+    if (alloc_proc == NULL || free_proc == NULL) {
+        DEBUG_BLOCK(
+            if (alloc_proc == NULL && free_proc == NULL) {
+                fprintf(stderr, "error: use format string allocator context: alloc and free proc is not defined\n"); 
+            }
+            else if (alloc_proc == NULL) {
+                fprintf(stderr, "error: use format string allocator context: alloc proc is not defined\n");
+            }
+            else if (free_proc == NULL) {
+                fprintf(stderr, "error: use format string allocator context: free proc is not defined\n");
+            }
+        );
+        return false;
+    }
+
+    global_fmt_string_allocator_ctx.alloc = alloc_proc;
+    global_fmt_string_allocator_ctx.free  = free_proc;
+
+    return true;
+}
+
+int fmt_string(const char **out, const char *fmtstr, ...) {
+    va_list args;
+
+    // initialize the va_list
+    va_start(args, fmtstr);
+
+    size_t len = vsnprintf(NULL, 0, fmtstr, args) + 1; 
+
+    // clean up the va_list before using it again
+    va_end(args); 
+
+    char *buf = (char *)global_fmt_string_allocator_ctx.alloc(len);
+    *out = buf;
+    // re-initialize the va_list for the second vsnprintf call
+    va_start(args, fmtstr);
+
+    vsnprintf(buf, len, fmtstr, args);
+
+     // clean up the va_list
+    va_end(args);
+    return len - 1;
+}
+
+void fmt_string_free(const char *ptr) {
+    FMT_STRING_free((void *)ptr);
+}
+
+#endif
+#endif 
+
 #pragma region c_compiler.h
+/**
+    @file c_compiler.h
+    @brief Provides an API for generating command-line arguments for various C/C++ compilers (Clang, GCC, MSVC).
+
+    Dependencies:
+    - assert.h:
+        - assert
+    - fmt_string.h:
+        - fmt_string
+    - os_path.h:
+        - Os_Path
+        - os_path_set_style
+        - os_path_dirname
+        - os_path_create
+    - string_builder.h:
+        - String_Builder
+        - string_builder_append_char
+        - string_builder_append_cstr
+        - string_builder_append_null
+        - string_builder_to_cstr
+        - string_builder_clear
+        - string_builder_free
+    - arg_builder.h:
+        - Arg_Builder
+        - arg_builder_append_one
+        - arg_builder_append
+        - arg_builder_concat
+        - arg_builder_free
+    - stdlib.h:
+        - malloc (aliased as C_COMPILER_alloc)
+        - realloc (aliased as C_COMPILER_realloc)
+        - free (aliased as C_COMPILER_free)
+
+    Features:
+    - Defines enumerations for supported C/C++ compilers (Clang, GCC, MSVC).
+    - Provides functions to get string representations of compiler types and executable names.
+    - Supports specifying the C/C++ standard to use during compilation.
+    - Allows setting the compiler warning level.
+    - Enables configuration of preprocessor definitions, header search paths, library search paths, and link libraries.
+    - Supports linking against frameworks (for Clang).
+    - Offers options to control the output type (executable, dynamic library, static library, object file) and output filename.
+    - Includes support for outputting debug symbols.
+    - Allows passing additional compiler and linker flags.
+    - Provides a function to generate the full command line for compiling a translation unit based on the provided options.
+
+
+    Documentation:
+    Do this
+        #define C_COMPILER_IMPL
+    before you include this file in *one* C or C++ file to create the implementation.
+
+    1. Include the `c_compiler.h` header file in your C/C++ code.
+    2. If you intend to use the `C_Compiler` API, in *one* of your `.c` or `.cpp` files, define the `C_COMPILER_IMPL` macro *before* including `c_compiler.h`. This will compile the implementation of the functions.
+    3. Create a `C_Compiler_Options` struct and initialize its members with the desired compilation settings. This includes specifying the C/C++ standard, warning level, preprocessor definitions, include paths, library paths, link libraries, output type, output filename, and other flags.
+    4. Choose the target compiler by using one of the `C_Compiler` enumeration values (e.g., `C_Compiler_Clang`, `C_Compiler_Gcc`, `C_Compiler_Msvc`).
+    5. Create an `Arg_Builder` struct to store the generated compiler command-line arguments.
+    6. Call the `c_compiler_compile_translation_unit()` function, passing the `Arg_Builder`, the chosen `C_Compiler` enum value, the configured `C_Compiler_Options`, and the path to the source file you want to compile.
+    7. After the function call, the `Arg_Builder` will contain the necessary command-line arguments to compile the specified translation unit with the given options. You can then use the `Arg_Builder` to execute the compiler command.
+    8. Remember to free the memory associated with the `Arg_Builder` when you are finished with it using `arg_builder_free()`.
+
+    @nickname Woody
+    @author Edward Briggs (woody@ebrb.ltd)
+    @date 2025-02-23 T 16:43:00+08:00
+
+    @copyright Copyright (c) 2025 Edward Briggs
+
+    @license
+    This header file is distributed under the MIT License.
+
+    Copyright (c) 2025 Edward Briggs
+
+    Permission is hereby granted, free of charge, to any person obtaining a copy
+    of this software and associated documentation files (the "Software"), to deal
+    in the Software without restriction, including without limitation the rights
+    to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+    copies of the Software, and to permit persons to whom the Software is
+    furnished to do so, subject to the following conditions:
+
+    The above copyright notice and this permission notice shall be included in all
+    copies or substantial portions of the Software.
+
+    THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+    IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+    FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+    AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+    LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+    OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+    SOFTWARE.
+*/
+
 #ifndef C_COMPILER_H
 #define C_COMPILER_H
 #include <assert.h>
 
-#include "tmp_alloc.h"
+#if !defined(CBUILD)
 #include "fmt_string.h"
 #include "os_path.h"
 #include "string_builder.h"
 #include "arg_builder.h"
+#endif
 
 #if defined(CBUILD_alloc)
 #define C_COMPILER_alloc CBUILD_alloc
@@ -2058,15 +2672,194 @@ boolx c_compiler_compile_translation_unit(Arg_Builder *arg_builder, C_Compiler c
 #endif // C_COMPILER_H
 
 #pragma region run.h
+/**
+    @file run.h
+    @brief Provides functions for running external processes, checking for rebuilds,
+        and handling rebuild and rerun scenarios.
+
+    Dependencies:
+    - os_path.h:
+        - Os_Path
+    - string_builder.h:
+        - String_Builder
+        - string_builder_clear
+        - string_builder_append_null
+    - arg_builder.h:
+        - Arg_Builder
+        - arg_builder_render
+        - arg_builder_clear
+    - os_helpers.h:
+        - os_get_last_modified_time
+        - os_get_last_error_string
+        - os_move_file
+    - c_compiler.h:
+        - C_Compiler_Options
+        - C_Compiler_Output_Type_Executable
+        - c_compiler_compile_translation_unit
+        - C_COMPILER_ENUM
+    - fmt_string.h:
+        - fmt_string
+        - fmt_string_free
+    - stdlib.h:
+        - malloc (aliased as RUN_alloc)
+        - realloc (aliased as RUN_realloc)
+        - free (aliased as RUN_free)
+    - Windows (when _WIN32 is defined):
+        - windows.h:
+            - STARTUPINFOA
+            - PROCESS_INFORMATION
+            - ZeroMemory
+            - GetStdHandle
+            - STD_INPUT_HANDLE
+            - STD_OUTPUT_HANDLE
+            - STD_ERROR_HANDLE
+            - STARTF_USESTDHANDLES
+            - CreateProcessA
+            - WaitForSingleObject
+            - INFINITE
+            - GetExitCodeProcess
+            - CloseHandle
+            - LocalFree
+    - Unix-like systems (when _WIN32 is not defined):
+        - unistd.h:
+            - execvp
+        - sys/wait.h:
+            - waitpid
+            - WIFEXITED
+            - WEXITSTATUS
+    - errno.h:
+        - errno
+
+    Features:
+    - Functions to run external processes asynchronously (`run_async`) and
+      synchronously (`run_sync`).
+    - A function to wait for an asynchronously running process to complete
+      (`run_wait_for_process`).
+    - A utility function to determine if an executable should be rebuilt based on
+      file modification times (`should_rebuild`).
+    - A function to automate the process of rebuilding an executable (by moving
+      the old one, compiling a new one) and then re-running it (`rebuild_and_rerun`).
+
+
+    Documentation:
+    Do this
+        #define RUN_IMPL
+    before you include this file in *one* C or C++ file to create the
+    implementation.
+
+    1. Include the `run.h` header file in your C/C++ code.
+    2. If you intend to use the `RUN` API, in *one* of your `.c` or `.cpp` files,
+      define the `RUN_IMPL` macro *before* including `run.h`. This will
+      compile the implementation of the functions.
+    3. Use `run_async(Arg_Builder *arg_builder, String_Builder *sb)` to start
+      an external process without waiting for it to finish.
+        - `arg_builder`: A pointer to an `Arg_Builder` object containing the
+          command and its arguments.
+        - `sb`: An optional pointer to a `String_Builder` object where the
+          rendered command line will be stored (can be NULL).
+        - Returns an `AsyncProcessInfo` structure containing information about
+          the started process (platform-specific).
+    4. Use `run_sync(Arg_Builder *arg_builder, String_Builder *sb)` to start an
+      external process and wait for it to complete.
+        - `arg_builder`: A pointer to an `Arg_Builder` object containing the
+          command and its arguments.
+        - `sb`: An optional pointer to a `String_Builder` object where the
+          rendered command line will be stored (can be NULL).
+        - Returns the exit code of the executed process. Returns -1 on failure
+          to start the process.
+    5. Use `run_wait_for_process(AsyncProcessInfo async_info)` to wait for a
+      process started with `run_async` to finish.
+        - `async_info`: The `AsyncProcessInfo` structure returned by
+          `run_async`.
+        - Returns the exit code of the process. Returns -1 if getting the
+          exit code fails.
+    6. Use
+      `should_rebuild(const char *exe_name, const char *filename, const char *const *
+      dependency_filenames, size_t num_dependency_filenames)` to determine if
+      an executable should be rebuilt.
+        - `exe_name`: The name (path) of the executable.
+        - `filename`: The name (path) of the main source file.
+        - `dependency_filenames`: An array of strings, where each string is the
+          name (path) of a dependency file.
+        - `num_dependency_filenames`: The number of dependency filenames in the
+          array.
+        - Returns `true` if the executable should be rebuilt (because a source
+          or dependency file is newer than the executable), `false` otherwise.
+    7. Use
+      `rebuild_and_rerun(Arg_Builder *arg_builder, String_Builder *sb,
+      C_Compiler_Options compile_options, int argc, char *const *argv,
+      const char *filename)` to handle rebuilding and then re-running the
+      current executable. This is typically used in build scripts that need to
+      recompile themselves if their source files have changed.
+        - `arg_builder`: A pointer to an `Arg_Builder` object configured for
+          compiling the source file.
+        - `sb`: A pointer to a `String_Builder` object used for building
+          command lines (can be NULL).
+        - `compile_options`: A `C_Compiler_Options` structure containing
+          compiler settings. The `output_type` will be set to `Executable`,
+          and `output_filename` will be set to the current executable's name.
+        - `argc`: The argument count passed to the `main` function.
+        - `argv`: The argument vector passed to the `main` function.
+        - `filename`: The name (path) of the main source file to be compiled.
+        - This function will move the existing executable, compile a new one,
+          and then attempt to re-run the new executable with the original
+          command-line arguments. It will exit the current process after
+          attempting to re-run.
+
+    @nickname Woody
+    @author Edward Briggs (woody@ebrb.ltd)
+    @date 2025-02-23 T 16:43:00+08:00
+
+    @copyright Copyright (c) 2025 Edward Briggs
+
+    @license
+    This header file is distributed under the MIT License.
+
+    Copyright (c) 2025 Edward Briggs
+
+    Permission is hereby granted, free of charge, to any person obtaining a copy
+    of this software and associated documentation files (the "Software"), to deal
+    in the Software without restriction, including without limitation the rights
+    to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+    copies of the Software, and to permit persons to whom the Software is
+    furnished to do so, subject to the following conditions:
+
+    The above copyright notice and this permission notice shall be included in all
+    copies or substantial portions of the Software.
+
+    THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+    IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+    FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+    AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+    LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+    OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+    SOFTWARE.
+*/
+
 #ifndef RUN_H
 #define RUN_H
 
+#if !defined(CBUILD)
 #include "os_path.h"
 #include "string_builder.h"
 #include "arg_builder.h"
-#include "os_helpers.h"
 #include "c_compiler.h"
 #include "fmt_string.h"
+#endif
+
+
+#ifndef BOOLX
+#define BOOLX
+typedef int boolx;
+
+#ifndef false
+#define false 0
+#endif // false
+
+#ifndef true
+#define true (!false)
+#endif // true
+#endif // BOOLX
 
 #if defined(CBUILD_alloc)
 #define RUN_alloc CBUILD_alloc
@@ -2112,7 +2905,22 @@ void rebuild_and_rerun(
 #if defined(CBUILD) || defined(RUN_IMPL)
 
 #ifdef _WIN32
-AsyncProcessInfo run_async(Arg_Builder *arg_Builder) {
+AsyncProcessInfo run_async(Arg_Builder *arg_Builder, String_Builder *sb) {
+    boolx using_backup_sb = false;
+    static String_Builder backup_sb = {0};
+
+    if (arg_builder == NULL) {
+        DEBUG_BLOCK(
+            fprintf(stderr, "error: run_async: arg_builder is null: exiting...\n");
+        );
+        exit(1);
+    }
+
+    if (sb == NULL) {
+        sb = &backup_sb;
+        using_backup_sb = true;
+    }
+
     string_builder_clear(sb);
     arg_builder_render(arg_Builder, sb);
     string_builder_append_null(sb);
@@ -2130,8 +2938,7 @@ AsyncProcessInfo run_async(Arg_Builder *arg_Builder) {
     si.dwFlags |= STARTF_USESTDHANDLES;
     ZeroMemory(&pi, sizeof(pi));
 
-    if (!CreateProcessA(NULL, sb->ptr, NULL, NULL, TRUE, 0, NULL, NULL, &si, &pi)
-    ) {
+    if (!CreateProcessA(NULL, sb->ptr, NULL, NULL, TRUE, 0, NULL, NULL, &si, &pi)) {
         DEBUG_BLOCK(
             char *os_err_msg = os_get_last_error_string();
             fprintf(stderr, "CreateProcess failed (%s).\n", os_err_msg);
@@ -2139,9 +2946,17 @@ AsyncProcessInfo run_async(Arg_Builder *arg_Builder) {
         );
         async_info.pi.hProcess = NULL; // Indicate failure
         async_info.pi.hThread = NULL;
+
+        if (using_backup_sb) {
+            string_builder_free(sb);
+        }
+
         return async_info;
     }
 
+    if (using_backup_sb) {
+        string_builder_free(sb);
+    }
     async_info.pi = pi;
     return async_info;
 }
@@ -2180,6 +2995,21 @@ int run_sync(Arg_Builder *arg_builder, String_Builder *sb) {
 #include <sys/wait.h>
 #include <errno.h>
 AsyncProcessInfo run_async(Arg_Builder *arg_builder, String_Builder *sb) {
+    boolx using_backup_sb = false;
+    static String_Builder backup_sb = {0};
+
+    if (arg_builder == NULL) {
+        DEBUG_BLOCK(
+            fprintf(stderr, "error: run_async: arg_builder is null: exiting...\n");
+        );
+        exit(1);
+    }
+
+    if (sb == NULL) {
+        sb = &backup_sb;
+        using_backup_sb = true;
+    }
+
     arg_builder_render(arg_builder, sb);
     string_builder_append_null(sb);
     
@@ -2195,21 +3025,29 @@ AsyncProcessInfo run_async(Arg_Builder *arg_builder, String_Builder *sb) {
         DEBUG_BLOCK(  
             fprintf(stderr, "error: unable to fork process %s\n", os_get_last_error_string());
         );
+        if (using_backup_sb) {
+            string_builder_free(sb);
+        }
         return async_info;
     } 
 
     // child process
     else if (pid == 0) { 
         int err = execvp(arg_builder->ptr[0], (char * const*) arg_builder->ptr);
+        if (using_backup_sb) {
+            string_builder_free(sb);
+        }
         if (err == -1) {
             exit(errno);
         }
-        (void)"unreachable";
         return async_info;
     }
 
     // parent process
-    else { 
+    else {
+        if (using_backup_sb) {
+            string_builder_free(sb);
+        }
         async_info.pid = pid;
         return async_info;
     }

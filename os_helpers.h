@@ -1,7 +1,90 @@
+/**
+    @file os_helpers.h
+    @brief Provides cross-platform helper functions for common operating system operations.
+
+    Dependencies:
+    - _stdio.h:
+        - (Details of functions used are unknown as the file content is not provided)
+    - stdio.h:
+        - fprintf
+        - fopen
+        - fclose
+        - fread
+        - fwrite
+        - fseek
+        - ftell
+        - fflush
+    - string.h:
+        - strerror
+    - Windows (when _WIN32 is defined):
+        - windows.h: GetLastError, FormatMessageA, LocalFree, CreateDirectoryA, MoveFileExA, CreateFileA, CloseHandle, WriteFile, FlushFileBuffers, GetFileSizeEx, HANDLE, INVALID_HANDLE_VALUE, GENERIC_READ, FILE_SHARE_READ, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, LARGE_INTEGER, BOOL, DWORD
+    - Unix-like systems (when _WIN32 is not defined):
+        - errno.h: errno
+        - unistd.h: rename
+        - sys/stat.h: mkdir, stat
+
+    Features:
+    - Provides a function to retrieve the last operating system error message as a string.
+    - Includes functions for moving (renaming) files and creating directories.
+    - Offers a function to get the last modification timestamp of a file.
+    - Provides an abstraction for file handles and functions to open files for reading and writing, and to close them.
+    - Includes functions to read the entire content of a file into a buffer and write the entire content of a buffer to a file.
+    - Offers a function to get the size of a file.
+    - Provides a function to check if a file handle is valid.
+
+
+    Documentation:
+    Do this
+        #define OS_HELPERS_IMPL
+    before you include this file in *one* C or C++ file to create the implementation.
+
+    1. Include the `os_helpers.h` header file in your C/C++ code.
+    2. If you intend to use the `OS_HELPERS` API, in *one* of your `.c` or `.cpp` files, define the `OS_HELPERS_IMPL` macro *before* including `os_helpers.h`. This will compile the implementation of the functions.
+    3. Use `os_get_last_error_string()` to get a human-readable string describing the last operating system error. The returned string might need to be freed depending on the platform (check the implementation details).
+    4. Use `os_move_file(old_filename, new_filename)` to rename or move a file from `old_filename` to `new_filename`. Returns `true` on success, `false` on failure.
+    5. Use `os_make_directory(dirname)` to create a new directory with the specified `dirname`. Returns `true` on success, `false` on failure.
+    6. Use `os_get_last_modified_time(filename)` to get the last modification time of the file specified by `filename`. Returns the time as a `long long int` (typically seconds since the epoch) or -1 on failure.
+    7. Use `os_open_file_for_read(filename)` to open a file for reading. Returns a `File_Handle`. Check if the handle is valid using `os_file_handle_is_valid()`.
+    8. Use `os_open_file_for_write(filename)` to open a file for writing. Returns a `File_Handle`. Check if the handle is valid.
+    9. Use `os_close_file(file_handle)` to close the file associated with the given `File_Handle`. Returns `true` on success, `false` on failure.
+    10. Use `os_write_entire_file(file_handle, filename, content)` to write the data in the `Char_Buffer content` to the file associated with `file_handle`. The `filename` is used for error reporting. Returns `true` on success, `false` on failure.
+    11. Use `os_read_entire_file(file_handle, filename, dest)` to read up to `dest.count` bytes from the file associated with `file_handle` into the `Char_Buffer dest`. The `filename` is used for error reporting. Returns `true` on success, `false` on failure.
+    12. Use `os_get_file_size(file_handle, filename)` to get the size of the file associated with `file_handle`. The `filename` is used for error reporting. Returns the size as a `size_t` or 0 on failure.
+    13. Use `os_file_handle_is_valid(file_handle)` to check if the provided `File_Handle` is valid (i.e., the file is open). Returns `true` if valid, `false` otherwise.
+
+    @nickname Woody
+    @author Edward Briggs (woody@ebrb.ltd)
+    @date 2025-02-23 T 16:43:00+08:00
+
+    @copyright Copyright (c) 2025 Edward Briggs
+
+    @license
+    This header file is distributed under the MIT License.
+
+    Copyright (c) 2025 Edward Briggs
+
+    Permission is hereby granted, free of charge, to any person obtaining a copy
+    of this software and associated documentation files (the "Software"), to deal
+    in the Software without restriction, including without limitation the rights
+    to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+    copies of the Software, and to permit persons to whom the Software is
+    furnished to do so, subject to the following conditions:
+
+    The above copyright notice and this permission notice shall be included in all
+    copies or substantial portions of the Software.
+
+    THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+    IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+    FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+    AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+    LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+    OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+    SOFTWARE.
+*/
+
 #ifndef OS_HELPERS_H
 #define OS_HELPERS_H
 
-#include <_stdio.h>
 #include <stdio.h>
 #include <string.h>
 
@@ -172,7 +255,7 @@ File_Handle os_open_file_for_write(const char *filename) {
 #endif
 }
 
-boolx os_file_close(File_Handle file_handle) {
+boolx os_close_file(File_Handle file_handle) {
 #if _WIN32
     return CloseHandle(file_handle.handle) == true;
 #else
