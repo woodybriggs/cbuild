@@ -2,6 +2,7 @@
 
 #define TMP_ALLOC_IMPL
 #define STRING_BUILDER_IMPL
+#define STRING_SLICE_IMPL
 #define ARG_BUILDER_IMPL
 #define OS_HELPERS_IMPL
 #define C_COMPILER_IMPL
@@ -18,6 +19,7 @@
 #define TMP_ALLOC_SIZE kilobytes_to_bytes(32)
 #include "../../tmp_alloc.h"
 #include "../../string_builder.h"
+#include "../../string_slice.h"
 #include "../../arg_builder.h"
 #include "../../os_helpers.h"
 #include "../../c_compiler.h"
@@ -35,6 +37,7 @@ int main(int argc, char **argv) {
         "macros.h",
         "tmp_alloc.h",
         "string_builder.h",
+		"string_slice.h",
         "arg_builder.h",
         "os_helpers.h",
         "os_path.h",
@@ -62,6 +65,7 @@ int main(int argc, char **argv) {
         fprintf(stderr, "error: file is invalid: %s\n", out_filename);
         return 1;
     }
+	fprintf(outfile.handle, "#pragma once\n\n");
     fprintf(outfile.handle, "#define CBUILD\n\n");
 
     fprintf(outfile.handle, "#ifndef CBUILD_alloc\n");

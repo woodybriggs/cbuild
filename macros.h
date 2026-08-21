@@ -72,10 +72,7 @@
 #endif // _WIN32
 
 #ifndef false
-#define false 0
-#endif
-
-#ifndef true
+#define false (0)
 #define true (!false)
 #endif
 

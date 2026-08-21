@@ -10,7 +10,11 @@ int main(int argc, char **argv) {
     Arg_Builder ab = {0};
     String_Builder sb = {0};
 
-    if (should_rebuild(argv[0], __FILE__, NULL, 0)) {
+	const char *dependencies[] = {
+		"cbuild.h"
+	};	
+
+    if (should_rebuild(argv[0], __FILE__, dependencies, array_len(dependencies))) {
         C_Compiler_Options rebuild_options = {
             .output_debug_symbols=true
         };
@@ -26,12 +30,14 @@ int main(int argc, char **argv) {
 #if defined _WIN32
     struct OsPath_ExeName tests[] = {
         { os_path_create("tests/tmp_alloc.test.c"), os_path_create("bin/tests/tmp_alloc.exe") },
-        { os_path_create("tests/os_path.test.c"),   os_path_create("bin/tests/os_path.exe") }
+        { os_path_create("tests/os_path.test.c"),   os_path_create("bin/tests/os_path.exe") },
+		{ os_path_create("tests/string_slice.test.c"), os_path_create("bin/tests/string_slice.exe") },
     };
 #else
     struct OsPath_ExeName tests[] = {
         { os_path_create("tests/tmp_alloc.test.c"), os_path_create("bin/tests/tmp_alloc") },
-        { os_path_create("tests/os_path.test.c"),   os_path_create("bin/tests/os_path") }
+        { os_path_create("tests/os_path.test.c"),   os_path_create("bin/tests/os_path") },
+		{ os_path_create("tests/string_slice.test.c"), os_path_create("bin/tests/string_slice") },
     };
 #endif // _WIN32
     AsyncProcessInfo apis[array_len(tests)] = {0};
@@ -53,30 +59,22 @@ int main(int argc, char **argv) {
 
         Os_Path dst_dirname = os_path_dirname(tests[i].dst);
         (void) os_make_directory(dst_dirname.path);
-        
-        int src_mod_time = os_get_last_modified_time(tests[i].src.path);
-        int dst_mod_time = os_get_last_modified_time(tests[i].dst.path);
 
-        if (src_mod_time == -1) {
-            fprintf(stderr, "error: os_get_last_modified_time for %s\n", tests[i].src.path);
-            exit(1);
-        }
+		if (should_rebuild(tests[i].dst.path, tests[i].src.path, dependencies, array_len(dependencies))) {
+			
+			const char *translation_unit_filename = tests[i].src.path;
+			build_options_tests.output_filename   = tests[i].dst.path;
 
-        if (dst_mod_time > src_mod_time) {
-            continue;
-        }
+			arg_builder_clear(&ab);
+			if (!c_compiler_compile_translation_unit(&ab, C_COMPILER_ENUM, build_options_tests, translation_unit_filename)) {
+				return 1;
+			}
 
-        const char *translation_unit_filename = tests[i].src.path;
-        build_options_tests.output_filename   = tests[i].dst.path;
+			string_builder_clear(&sb);
+			AsyncProcessInfo api = run_async(&ab, &sb);
+			apis[i] = api;
 
-        arg_builder_clear(&ab);
-        if (!c_compiler_compile_translation_unit(&ab, C_COMPILER_ENUM, build_options_tests, translation_unit_filename)) {
-            return 1;
-        }
-
-        string_builder_clear(&sb);
-        AsyncProcessInfo api = run_async(&ab, &sb);
-        apis[i] = api;
+		}
     }
 
     int exit_code = 0;

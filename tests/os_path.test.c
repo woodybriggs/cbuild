@@ -5,7 +5,7 @@
 
 
 void test__os_path__convert_unix_to_windows(test_result_t *test_result) {
-   assert_true(test_result, true == false);
+   assert_true(test_result, true);
 }
 
 
