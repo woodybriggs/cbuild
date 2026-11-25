@@ -62,11 +62,11 @@ int main(int argc, char **argv) {
 
 		if (should_rebuild(tests[i].dst.path, tests[i].src.path, dependencies, array_len(dependencies))) {
 			
-			const char *translation_unit_filename = tests[i].src.path;
+			const char *translation_units[] = { tests[i].src.path };
 			build_options_tests.output_filename   = tests[i].dst.path;
 
 			arg_builder_clear(&ab);
-			if (!c_compiler_compile_translation_unit(&ab, C_COMPILER_ENUM, build_options_tests, translation_unit_filename)) {
+			if (!c_compiler_compile_translation_units(&ab, C_COMPILER_ENUM, build_options_tests, translation_units, array_len(translation_units))) {
 				return 1;
 			}
 

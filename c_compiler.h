@@ -229,9 +229,9 @@ typedef struct C_Compiler_Options_S {
 
 } C_Compiler_Options;
 
-boolx c_compiler_compile_translation_unit(Arg_Builder *arg_builder, C_Compiler c_compiler, C_Compiler_Options options, const char *c_filename);
+boolx c_compiler_compile_translation_units(Arg_Builder *arg_builder, C_Compiler c_compiler, C_Compiler_Options options, const char * const *translation_unit_filenames, size_t num_translation_units);
 
-#if defined(CBUILD) || defined(C_COMPILER_IMPL) || 1
+#if defined(CBUILD) || defined(C_COMPILER_IMPL)
 
 #ifdef __clang__
 const C_Compiler C_COMPILER_ENUM = C_Compiler_Clang;
@@ -372,11 +372,11 @@ boolx c_compiler_render_header_search_paths(Arg_Builder *arg_builder, C_Compiler
 
         const char *flag = 0;
         if (c_compiler == C_Compiler_Clang || c_compiler == C_Compiler_Gcc) {
-            os_path_set_style(header_search_paths.data + i, OS_PATH_STYLE_UNIX);
-            fmt_string(&flag, "-I%s", header_search_paths.data + i);
+            os_path_set_style(&header_search_paths.data[i], OS_PATH_STYLE_UNIX);
+            fmt_string(&flag, "-I%s", header_search_paths.data[i].path);
         }
         else if (c_compiler == C_Compiler_Msvc) {
-            fmt_string(&flag, "/I\"%s\"", header_search_paths.data + i);
+            fmt_string(&flag, "/I\"%s\"", header_search_paths.data[i].path);
         }
         else {
             fprintf(stderr, "unreachable: c compiler render header search paths: unsupported c compiler: %s\n", c_compiler_str(c_compiler));
@@ -667,7 +667,7 @@ boolx c_compiler_render_output_options(Arg_Builder *compiler_cmd, Arg_Builder *l
     }
 }
 
-boolx c_compiler_compile_translation_unit(Arg_Builder *arg_builder, C_Compiler c_compiler, C_Compiler_Options options, const char *translation_unit_filename) {
+boolx c_compiler_compile_translation_units(Arg_Builder *arg_builder, C_Compiler c_compiler, C_Compiler_Options options, const char* const *translation_unit_filenames, size_t num_translation_units) {
     
     if(!arg_builder_append_one(arg_builder, c_compiler_exe_str(c_compiler))) {
         return false;
@@ -690,14 +690,20 @@ boolx c_compiler_compile_translation_unit(Arg_Builder *arg_builder, C_Compiler c
 
     if (c_compiler == C_Compiler_Msvc) {
         arg_builder_concat(arg_builder, &compiler_flags);
-        arg_builder_append_one(arg_builder, translation_unit_filename);
+        for (size_t i = 0; i < num_translation_units; ++i) {
+            const char * translation_unit_filename = translation_unit_filenames[i];
+            arg_builder_append_one(arg_builder, translation_unit_filename);
+        }
         arg_builder_append_one(arg_builder, "/link");
         arg_builder_concat(arg_builder, &linker_flags);
     }
     else {
         arg_builder_concat(arg_builder, &compiler_flags);
         arg_builder_concat(arg_builder, &linker_flags);
-        arg_builder_append_one(arg_builder, translation_unit_filename);
+        for (size_t i = 0; i < num_translation_units; ++i) {
+            const char * translation_unit_filename = translation_unit_filenames[i];
+            arg_builder_append_one(arg_builder, translation_unit_filename);
+        }
     }
 
     arg_builder_free(linker_flags);

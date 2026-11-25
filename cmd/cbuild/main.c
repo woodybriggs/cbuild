@@ -39,6 +39,7 @@ int main(int argc, char **argv) {
         "string_builder.h",
 		"string_slice.h",
         "arg_builder.h",
+        "arg_parser.h",
         "os_helpers.h",
         "os_path.h",
         "fmt_string.h",

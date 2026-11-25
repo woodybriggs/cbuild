@@ -1,3 +1,5 @@
+#pragma once
+
 #define CBUILD
 
 #ifndef CBUILD_alloc
@@ -661,6 +663,192 @@ void string_builder_to_cstr(String_Builder *sb, char *cstr, size_t len) {
 #endif // STRING_BUILDER_IMPL
 #endif // STRING_BUILDER_H
 
+#pragma region string_slice.h
+#pragma once
+
+#include <assert.h>
+#include <stddef.h>
+#include <string.h>
+
+#ifndef false
+#define false (0)
+#define true (!false)
+typedef int boolx;
+#endif
+
+typedef struct String_Slice_S {
+	const char *str;
+	size_t 		len;
+} String_Slice;
+
+typedef int (*test_char)(char c);
+
+String_Slice string_slice_from_cstr(const char *cstr);
+int string_slice_cmp(String_Slice a, String_Slice b);
+boolx string_slice_has_prefix(String_Slice sub, String_Slice prefix);
+boolx string_slice_has_suffix(String_Slice sub, String_Slice suffix);
+String_Slice string_slice_trim_prefix(String_Slice sub, String_Slice prefix);
+String_Slice string_slice_trim_prefix_all(String_Slice sub, String_Slice prefix);
+String_Slice string_slice_trim_start_while(String_Slice sub, test_char predicate);
+String_Slice string_slice_trim_suffix(String_Slice sub, String_Slice suffix);
+String_Slice string_slice_trim_suffix_all(String_Slice sub, String_Slice suffix);
+int string_slice_find(String_Slice str, String_Slice substr);
+String_Slice string_slice_slice(String_Slice str, size_t start_inclusive, size_t end_inclusive);
+String_Slice string_slice_split_by_delimiter(size_t *at, String_Slice sub, String_Slice delim);
+
+static inline size_t _min_size_t(size_t a, size_t b) {
+	return (a < b) ? a : b;
+}
+
+String_Slice string_slice_from_cstr(const char *cstr) {
+	return (String_Slice){
+		.str = cstr,
+		.len = strlen(cstr)
+	};
+}
+
+int string_slice_cmp(String_Slice a, String_Slice b) {
+	if (a.len != b.len) return 0;
+	for (size_t i = 0; i < a.len; i++) {
+		if (a.str[i] != b.str[i]) return 0;
+	}
+	return 1;
+}
+
+boolx string_slice_has_prefix(String_Slice sub, String_Slice prefix) {
+	if (sub.len < prefix.len) return false;
+
+	for (size_t i = 0; i < prefix.len; ++i) {
+		if (sub.str[i] != prefix.str[i]) return false;
+	}
+
+	return true;
+}
+
+boolx string_slice_has_suffix(String_Slice sub, String_Slice suffix) {
+	if (sub.len < suffix.len) return false;
+
+	size_t j = suffix.len;
+	for (size_t i = sub.len; i > sub.len-suffix.len; --i) {
+		if (sub.str[i-1] != suffix.str[j-1]) return false;
+		--j;
+	}
+
+	return true;
+}
+
+String_Slice string_slice_trim_prefix(String_Slice sub, String_Slice prefix) {
+	if (!string_slice_has_prefix(sub, prefix)) return sub;
+
+	String_Slice result = sub;
+	result.str += prefix.len;
+	result.len -= prefix.len;
+
+	return result;
+}
+
+String_Slice string_slice_trim_prefix_all(String_Slice sub, String_Slice prefix) {
+	String_Slice result = sub;
+	while (string_slice_has_prefix(result, prefix)) {
+		result.str += prefix.len;
+		result.len -= prefix.len;
+	}
+
+	return result;
+}
+
+String_Slice string_slice_trim_start_while(String_Slice sub, test_char predicate) {
+	size_t at = 0;
+	for (at = 0; predicate(sub.str[at]) && (at < sub.len); ++at);
+
+	return (String_Slice){
+		.str = sub.str + at,
+		.len = sub.len - at,
+	};
+}
+
+String_Slice string_slice_trim_suffix(String_Slice sub, String_Slice suffix) {
+	if (!string_slice_has_suffix(sub, suffix)) return sub;
+
+	String_Slice result = sub;
+	result.len -= suffix.len;
+
+	return result;
+}
+
+String_Slice string_slice_trim_suffix_all(String_Slice sub, String_Slice suffix) {
+	String_Slice result = sub;
+	while (string_slice_has_suffix(result, suffix)) {
+		result.len -= suffix.len;
+	}
+
+	return result;
+}
+
+int string_slice_find(String_Slice str, String_Slice substr) {
+	if (str.len < substr.len) return -1;
+
+	for (size_t i = 0; i <= str.len - substr.len; ++i) {
+		boolx match = true;
+		for (size_t j = 0; j < substr.len; ++j) {
+			if (str.str[i + j] != substr.str[j]) {
+				match = false;
+				break;
+			}
+		}
+
+		if (match == true) {
+			return (int)i;
+		}
+	}
+
+	return -1;
+}
+
+String_Slice string_slice_slice(String_Slice str, size_t start, size_t end) {
+	if (str.len == 0 || start > end) {
+		return (String_Slice){
+			.str = str.str + start,
+			.len = 0,
+		};
+	}
+	assert(end < str.len && "string_slice_slice: end must be within bounds of str.len");
+	return (String_Slice){
+		.str = str.str + start,
+		.len = (end - start) + 1,
+	};
+}
+
+String_Slice string_slice_split_by_delimiter(size_t *at, String_Slice sub, String_Slice delim) {
+	if (*at == sub.len) {
+		return (String_Slice){ .str = "", .len = 0 };
+	}
+
+	String_Slice remaining = string_slice_slice(sub, *at, sub.len-1);
+	int next_delim = string_slice_find(remaining, delim);
+
+	if (next_delim == -1) {
+		(*at) += remaining.len;
+		return remaining;
+	}
+
+	String_Slice result;
+	if (next_delim == 0) {
+		result = (String_Slice){ .str = remaining.str, .len = 0 };
+	} else {
+		result = string_slice_slice(remaining, 0, (size_t)next_delim-1);
+	}
+
+	(*at) += result.len + delim.len;
+
+	return result;
+}
+
+boolx string_slice_eq(String_Slice a, String_Slice b) {
+	if (a.len != b.len) return false;
+	return memcmp(a.str, b.str, a.len) == 0;
+}
+
 #pragma region arg_builder.h
 /**
     @file arg_builder.h
@@ -912,6 +1100,186 @@ void arg_builder_free(Arg_Builder arg_builder) {
 
 #endif // ARG_BUILDER_IMPL
 #endif  // ARG_BUILDER_H
+
+#pragma region arg_parser.h
+/**
+    @file arg_parser.h
+    @brief Command-line argument parser with support for positional args, flags, and key-value pairs.
+
+    Dependencies:
+    - string_slice.h: Uses String_Slice for non-owning string operations
+
+    Features:
+    - Parses --long and -short style arguments
+    - Supports key=value syntax (--flag=value)
+    - Supports space-separated key-value pairs (--key value, -k value)
+    - Handles positional arguments
+    - Peek ahead without consuming arguments
+
+    Documentation:
+    1. Use arg_parser_has_remaining_args() to check if more arguments exist
+    2. Call arg_parser_next() in a loop to consume arguments
+    3. Check the returned Arg's .type field to determine argument type
+    4. Use arg_parser_peek() to look ahead without advancing
+
+    @nickname Woody
+    @author Edward Briggs (woody@ebrb.ltd)
+    @date 2025-02-23 T 16:43:00+08:00
+
+    @copyright Copyright (c) 2025 Edward Briggs
+
+    @license
+    This header file is distributed under the MIT License.
+
+    Copyright (c) 2025 Edward Briggs
+
+    Permission is hereby granted, free of charge, to any person obtaining a copy
+    of this software and associated documentation files (the "Software"), to deal
+    in the Software without restriction, including without limitation the rights
+    to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+    copies of the Software, and to permit persons to whom the Software is
+    furnished to do so, subject to the following conditions:
+
+    The above copyright notice and this permission notice shall be included in all
+    copies or substantial portions of the Software.
+
+    THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+    IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+    FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+    AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+    LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+    OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+    SOFTWARE.
+*/
+
+#ifndef ARG_PARSER_H
+#define ARG_PARSER_H
+
+#if !defined(CBUILD)
+#include "string_slice.h"
+#endif
+
+typedef enum Arg_Type_E {
+	Arg_Type_None,
+	Arg_Type_Positional,
+	Arg_Type_Flag,
+	Arg_Type_KeyVal,
+} Arg_Type;
+
+typedef struct Arg_S {
+	Arg_Type 		type;
+	String_Slice 	flag;
+	String_Slice 	value;
+} Arg;
+
+boolx arg_parser_has_remaining_args(int argc, int current) {
+	return (argc - current) > 0;
+}
+
+static const String_Slice _arg_parser_single_hyphen = {
+	.str = "-",
+	.len = 1,
+};
+
+static const String_Slice _arg_parser_double_hyphen = {
+	.str = "--",
+	.len = 2,
+};
+
+static const String_Slice _arg_parser_equals = {
+	.str = "=",
+	.len = 1,
+};
+
+static int _arg_parser_is_valid_flag_ident_char(char c) {
+	if (c >= 'a' && c <= 'z') return true;
+	else if (c >= 'A' && c <= 'Z') return true;
+	else if (c == '-' || c == '_') return true;
+	else if (c >= '0' && c <= '9') return true;
+	return false;
+}
+
+Arg arg_parser_next(int argc, const char* argv[], int *current);
+Arg arg_parser_peek(int argc, const char* argv[], int current);
+
+static inline Arg _arg_parser_finalize(
+	String_Slice flag_prefix,
+	String_Slice current_str,
+	Arg peeked,
+	int *current
+) {
+	Arg result = {0};
+
+	String_Slice flag_name = string_slice_trim_prefix(current_str, flag_prefix);
+	String_Slice possible_value = string_slice_trim_start_while(flag_name, _arg_parser_is_valid_flag_ident_char);
+
+	if (possible_value.len > 0) {
+		if (possible_value.str[0] == '=') {
+			String_Slice value = string_slice_trim_prefix(possible_value, _arg_parser_equals);
+			String_Slice flag  = string_slice_trim_suffix(flag_name, value);
+			flag.len-=1;
+			result.type = Arg_Type_KeyVal;
+			result.flag = flag;
+			result.value = value;
+			(*current)++;
+			return result;
+		}
+
+		(*current)++;
+		return result;
+	}
+
+	switch (peeked.type) {
+		case Arg_Type_Positional:
+		{
+			(*current)+=2;
+			result.type = Arg_Type_KeyVal;
+			result.flag = current_str;
+			result.value = peeked.value;
+		} break;
+		default:
+		{
+			(*current)++;
+			result.type = Arg_Type_Flag;
+			result.flag = current_str;
+		}
+	}
+
+	return result;
+}
+
+Arg arg_parser_peek(int argc, const char* argv[], int current) {
+	int to_peek = current+1;
+	return arg_parser_next(argc, argv, &to_peek);
+}
+
+Arg arg_parser_next(int argc, const char* argv[], int *current) {
+	Arg result = {0};
+	if (*current >= argc) {
+		return result;
+	}
+
+	String_Slice current_str = string_slice_from_cstr(argv[*current]);
+
+	if (false) {}
+	else if (string_slice_has_prefix(current_str, _arg_parser_double_hyphen)) {
+		Arg peeked = arg_parser_peek(argc, argv, *current);
+		result = _arg_parser_finalize(_arg_parser_double_hyphen, current_str, peeked, current);
+	}
+	else if (string_slice_has_prefix(current_str, _arg_parser_single_hyphen)) {
+		Arg peeked = arg_parser_peek(argc, argv, *current);
+		result = _arg_parser_finalize(_arg_parser_single_hyphen, current_str, peeked, current);
+	}
+	else {
+		result.type  = Arg_Type_Positional;
+		result.value = current_str;
+		(*current)++;
+	}
+
+	return result;
+}
+
+#endif // ARG_PARSER_H
 
 #pragma region os_helpers.h
 /**
@@ -2192,9 +2560,9 @@ typedef struct C_Compiler_Options_S {
 
 } C_Compiler_Options;
 
-boolx c_compiler_compile_translation_unit(Arg_Builder *arg_builder, C_Compiler c_compiler, C_Compiler_Options options, const char *c_filename);
+boolx c_compiler_compile_translation_units(Arg_Builder *arg_builder, C_Compiler c_compiler, C_Compiler_Options options, const char * const *translation_unit_filenames, size_t num_translation_units);
 
-#if defined(CBUILD) || defined(C_COMPILER_IMPL) || 1
+#if defined(CBUILD) || defined(C_COMPILER_IMPL)
 
 #ifdef __clang__
 const C_Compiler C_COMPILER_ENUM = C_Compiler_Clang;
@@ -2335,11 +2703,11 @@ boolx c_compiler_render_header_search_paths(Arg_Builder *arg_builder, C_Compiler
 
         const char *flag = 0;
         if (c_compiler == C_Compiler_Clang || c_compiler == C_Compiler_Gcc) {
-            os_path_set_style(header_search_paths.data + i, OS_PATH_STYLE_UNIX);
-            fmt_string(&flag, "-I%s", header_search_paths.data + i);
+            os_path_set_style(&header_search_paths.data[i], OS_PATH_STYLE_UNIX);
+            fmt_string(&flag, "-I%s", header_search_paths.data[i].path);
         }
         else if (c_compiler == C_Compiler_Msvc) {
-            fmt_string(&flag, "/I\"%s\"", header_search_paths.data + i);
+            fmt_string(&flag, "/I\"%s\"", header_search_paths.data[i].path);
         }
         else {
             fprintf(stderr, "unreachable: c compiler render header search paths: unsupported c compiler: %s\n", c_compiler_str(c_compiler));
@@ -2630,7 +2998,7 @@ boolx c_compiler_render_output_options(Arg_Builder *compiler_cmd, Arg_Builder *l
     }
 }
 
-boolx c_compiler_compile_translation_unit(Arg_Builder *arg_builder, C_Compiler c_compiler, C_Compiler_Options options, const char *translation_unit_filename) {
+boolx c_compiler_compile_translation_units(Arg_Builder *arg_builder, C_Compiler c_compiler, C_Compiler_Options options, const char* const *translation_unit_filenames, size_t num_translation_units) {
     
     if(!arg_builder_append_one(arg_builder, c_compiler_exe_str(c_compiler))) {
         return false;
@@ -2653,14 +3021,20 @@ boolx c_compiler_compile_translation_unit(Arg_Builder *arg_builder, C_Compiler c
 
     if (c_compiler == C_Compiler_Msvc) {
         arg_builder_concat(arg_builder, &compiler_flags);
-        arg_builder_append_one(arg_builder, translation_unit_filename);
+        for (size_t i = 0; i < num_translation_units; ++i) {
+            const char * translation_unit_filename = translation_unit_filenames[i];
+            arg_builder_append_one(arg_builder, translation_unit_filename);
+        }
         arg_builder_append_one(arg_builder, "/link");
         arg_builder_concat(arg_builder, &linker_flags);
     }
     else {
         arg_builder_concat(arg_builder, &compiler_flags);
         arg_builder_concat(arg_builder, &linker_flags);
-        arg_builder_append_one(arg_builder, translation_unit_filename);
+        for (size_t i = 0; i < num_translation_units; ++i) {
+            const char * translation_unit_filename = translation_unit_filenames[i];
+            arg_builder_append_one(arg_builder, translation_unit_filename);
+        }
     }
 
     arg_builder_free(linker_flags);
@@ -2995,9 +3369,6 @@ int run_sync(Arg_Builder *arg_builder, String_Builder *sb) {
 #include <sys/wait.h>
 #include <errno.h>
 AsyncProcessInfo run_async(Arg_Builder *arg_builder, String_Builder *sb) {
-    boolx using_backup_sb = false;
-    static String_Builder backup_sb = {0};
-
     if (arg_builder == NULL) {
         DEBUG_BLOCK(
             fprintf(stderr, "error: run_async: arg_builder is null: exiting...\n");
@@ -3006,10 +3377,13 @@ AsyncProcessInfo run_async(Arg_Builder *arg_builder, String_Builder *sb) {
     }
 
     if (sb == NULL) {
-        sb = &backup_sb;
-        using_backup_sb = true;
+        DEBUG_BLOCK(
+            fprintf(stderr, "error: run_async: sb is null: exiting...\n");
+        );
+        exit(1);
     }
 
+    string_builder_clear(sb);
     arg_builder_render(arg_builder, sb);
     string_builder_append_null(sb);
     
@@ -3025,18 +3399,13 @@ AsyncProcessInfo run_async(Arg_Builder *arg_builder, String_Builder *sb) {
         DEBUG_BLOCK(  
             fprintf(stderr, "error: unable to fork process %s\n", os_get_last_error_string());
         );
-        if (using_backup_sb) {
-            string_builder_free(sb);
-        }
         return async_info;
     } 
 
     // child process
-    else if (pid == 0) { 
+    else if (pid == 0) {
+    
         int err = execvp(arg_builder->ptr[0], (char * const*) arg_builder->ptr);
-        if (using_backup_sb) {
-            string_builder_free(sb);
-        }
         if (err == -1) {
             exit(errno);
         }
@@ -3045,9 +3414,6 @@ AsyncProcessInfo run_async(Arg_Builder *arg_builder, String_Builder *sb) {
 
     // parent process
     else {
-        if (using_backup_sb) {
-            string_builder_free(sb);
-        }
         async_info.pid = pid;
         return async_info;
     }
@@ -3088,6 +3454,7 @@ boolx should_rebuild(const char *exe_name, const char *filename, const char *con
     long long int exe_modified_time  = os_get_last_modified_time(exe_name);
     if (exe_modified_time == -1) {
         fprintf(stderr, "error: rebuilding build system: cannot find %s\n", exe_name);
+        needs_rebuild = true;
         return needs_rebuild;
     }
 
@@ -3150,7 +3517,10 @@ void rebuild_and_rerun(
 
     compile_options.output_type = C_Compiler_Output_Type_Executable;
     compile_options.output_filename = exe_name;
-    if (!c_compiler_compile_translation_unit(arg_builder, C_COMPILER_ENUM, compile_options, filename)) {
+    const char * translation_units[] = {
+        filename
+    };
+    if (!c_compiler_compile_translation_units(arg_builder, C_COMPILER_ENUM, compile_options, translation_units, array_len(translation_units))) {
         fmt_string_free(new_filename);
         exit(1);
     }

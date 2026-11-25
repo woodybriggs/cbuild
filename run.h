@@ -321,9 +321,6 @@ int run_sync(Arg_Builder *arg_builder, String_Builder *sb) {
 #include <sys/wait.h>
 #include <errno.h>
 AsyncProcessInfo run_async(Arg_Builder *arg_builder, String_Builder *sb) {
-    boolx using_backup_sb = false;
-    static String_Builder backup_sb = {0};
-
     if (arg_builder == NULL) {
         DEBUG_BLOCK(
             fprintf(stderr, "error: run_async: arg_builder is null: exiting...\n");
@@ -332,10 +329,13 @@ AsyncProcessInfo run_async(Arg_Builder *arg_builder, String_Builder *sb) {
     }
 
     if (sb == NULL) {
-        sb = &backup_sb;
-        using_backup_sb = true;
+        DEBUG_BLOCK(
+            fprintf(stderr, "error: run_async: sb is null: exiting...\n");
+        );
+        exit(1);
     }
 
+    string_builder_clear(sb);
     arg_builder_render(arg_builder, sb);
     string_builder_append_null(sb);
     
@@ -351,18 +351,13 @@ AsyncProcessInfo run_async(Arg_Builder *arg_builder, String_Builder *sb) {
         DEBUG_BLOCK(  
             fprintf(stderr, "error: unable to fork process %s\n", os_get_last_error_string());
         );
-        if (using_backup_sb) {
-            string_builder_free(sb);
-        }
         return async_info;
     } 
 
     // child process
-    else if (pid == 0) { 
+    else if (pid == 0) {
+    
         int err = execvp(arg_builder->ptr[0], (char * const*) arg_builder->ptr);
-        if (using_backup_sb) {
-            string_builder_free(sb);
-        }
         if (err == -1) {
             exit(errno);
         }
@@ -371,9 +366,6 @@ AsyncProcessInfo run_async(Arg_Builder *arg_builder, String_Builder *sb) {
 
     // parent process
     else {
-        if (using_backup_sb) {
-            string_builder_free(sb);
-        }
         async_info.pid = pid;
         return async_info;
     }
@@ -414,6 +406,7 @@ boolx should_rebuild(const char *exe_name, const char *filename, const char *con
     long long int exe_modified_time  = os_get_last_modified_time(exe_name);
     if (exe_modified_time == -1) {
         fprintf(stderr, "error: rebuilding build system: cannot find %s\n", exe_name);
+        needs_rebuild = true;
         return needs_rebuild;
     }
 
@@ -476,7 +469,10 @@ void rebuild_and_rerun(
 
     compile_options.output_type = C_Compiler_Output_Type_Executable;
     compile_options.output_filename = exe_name;
-    if (!c_compiler_compile_translation_unit(arg_builder, C_COMPILER_ENUM, compile_options, filename)) {
+    const char * translation_units[] = {
+        filename
+    };
+    if (!c_compiler_compile_translation_units(arg_builder, C_COMPILER_ENUM, compile_options, translation_units, array_len(translation_units))) {
         fmt_string_free(new_filename);
         exit(1);
     }
